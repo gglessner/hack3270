@@ -16,9 +16,9 @@
 # ---------------------
 #  Jan Nunez
 #  Claire Ould
-#  Jay Smith
+#  Jay Smith - email: CadmusOfThebes@protonmail.com
 #  Chance Warren
-#  Phil Young
+#  Phil Young - email: mainframed767@gmail.com
 # ---------------------
 
 import sys
