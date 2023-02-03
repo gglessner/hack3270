@@ -19,28 +19,6 @@ import socket
 import ssl
 import select
 
-aid_name = [ 'NO', 'QREPLY', 'ENTER',
-  'PF1', 'PF2', 'PF3', 'PF4', 'PF5', 'PF6', 'PF7', 'PF8', 'PF9',
-  'PF10', 'PF11', 'PF12', 'PF13', 'PF14', 'PF15', 'PF16', 'PF17', 'PF18',
-  'PF19', 'PF20', 'PF21', 'PF22', 'PF23', 'PF24',
-  'OICR', 'MSR_MHS', 'SELECT',
-  'PA1', 'PA2', 'PA3',
-  'CLEAR', 'SYSREQ' ]
-aid_char = [ b'\x60', b'\x61', 'b\x7d',
-  b'\xf1', b'\xf2', b'\xf3', b'\xf4', b'\xf5', b'\xf6', b'\xf7', b'\xf8', b'\xf9',
-  b'\x7a', b'\x7b', b'\x7c', b'\xc1', b'\xc2', b'\xc3', b'\xc4', b'\xc5', b'\xc6',
-  b'\xc7', b'\xc8', b'\xc9', b'\x4a', b'\x4b', b'\x4c',
-  b'\xe6', b'\xe7', b'\x7e',
-  b'\x6c', b'\x6e', b'\x6b',
-  b'\x6d', b'\xf0' ]
-aid_default = [ 1, 1, 0,
-  1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1,
-  1, 1, 1,
-  1, 1, 1,
-  0, 1 ] 
-
 table = [
   '[NUL]', '[SOH]', '[STX]', '[ETX]', '[PF]', '[HT]', '[LC]', '[DEL]', '[GE]', '[RLF]', '[SMM]', '[VT]', '[FF]', '[CR]', '[SO]', '[SI]',
   '[DLE]', '[DC1]', '[DC2]', '[TM]', '[RES]', '[NL]', '[BS]', '[IL]', '[CAN]', '[EM]', '[CC]', '[CU1]', '[IFS]', '[IGS]', '[IRS]', '[IUS]',
