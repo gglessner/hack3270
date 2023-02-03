@@ -64,7 +64,6 @@ inject_postample = b''
 root = tk.Tk()
 tabControl = ttk.Notebook(root)
 s = ttk.Style()
-# Create style used by default for all Frames
 s.configure('TFrame', background='light grey')
 tab1 = ttk.Frame(tabControl)
 tab2 = ttk.Frame(tabControl)
