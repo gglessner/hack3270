@@ -16,7 +16,7 @@ The -n (or --name) option determines the name of the SQLite3 log db file that is
 
 The -i and -p options are to setup your connection to the mainframe.  This IP and port will be what you normally use in your tn3270 emulator to connect to the mainframe.
 
-The -t option enables TLS for the mainframe connect.  For the local connection, TLS is not implemented and is not required.
+The -t option enables TLS for the mainframe connection.  For the local connection, TLS is not implemented and is not required.
 
 The -l option sets the listening local port.  Connections to this port are NOT encrypted.  This allows software such as Wireshark to be used if the tester needs to create network packet captures; however if connections to the mainframe are encrypted it is recommended to only connect to the localhost host address (127.0.0.1) instead of connecting to this port remotely, which would result in unencrypted tn3270 application data traversing the network.
 
