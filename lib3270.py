@@ -19,6 +19,7 @@ import socket
 import ssl
 import select
 
+# EBCDIC to ASCII conversion table
 table = [
   '[NUL]', '[SOH]', '[STX]', '[ETX]', '[PF]', '[HT]', '[LC]', '[DEL]', '[GE]', '[RLF]', '[SMM]', '[VT]', '[FF]', '[CR]', '[SO]', '[SI]',
   '[DLE]', '[DC1]', '[DC2]', '[TM]', '[RES]', '[NL]', '[BS]', '[IL]', '[CAN]', '[EM]', '[CC]', '[CU1]', '[IFS]', '[IGS]', '[IRS]', '[IUS]',
@@ -83,15 +84,15 @@ def server_connect(window, ip, port, tls_enabled):
 
 def flip_bits(passed_value, hack_prot, hack_hf, hack_rnr):
     value = passed_value
-    # Protected
+    # Turn of 'Protected' Flag (Bit 6) if Set
     if hack_prot:
         if value & 0b00100000 == 0b00100000:
             value ^= 0b00100000
-    # Hidden
+    # Turn off 'Non-display' Flag (Bit 4) if Set (i.e. Bits 3 and 4 are on)
     if hack_hf:
         if value & 0b00001100 == 0b00001100:
             value ^= 0b00001000
-    # Numeric Only
+    # Turn off 'Numeric Only' Flag (Bit 5) if Set
     if hack_rnr:
         if value & 0b00010000 == 0b00010000:
             value ^= 0b00010000
@@ -116,14 +117,14 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack
         elif hack_sa and data[x] == 0x28: # Set Attribute
             if(len(data) < x + 3):
                 continue
-            if data[x + 2] == 0xc0:
+            if data[x + 2] == 0xc0: # Basic 3270 field attributes
                 data[x + 3] = flip_bits(data[x + 3], hack_prot, hack_hf, hack_rnr)
             continue
         elif hack_mf and data[x] == 0x2c: # Modify Field
             for y in range(data[x + 1]):
                 if(len(data) < ((x + 3) + (y * 2))):
                     continue
-                if data[((x + 3) + (y * 2)) - 1] == 0xc0:
+                if data[((x + 3) + (y * 2)) - 1] == 0xc0: # Basic 3270 field attributes
                     data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr)
             continue
     return(data)
