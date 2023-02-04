@@ -562,7 +562,7 @@ root.protocol("WM_DELETE_WINDOW", on_closing)
 frame = tk.Frame(root)
 frame.pack(side="top", expand=True, fill="both")
 
-readme_file = open("readme.txt", "r")
+readme_file = open("README", "r")
 readme_text = readme_file.read(10000)
 
 root.title(NAME + " v"+VERSION)
