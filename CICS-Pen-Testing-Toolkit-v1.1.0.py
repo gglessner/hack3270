@@ -14,7 +14,7 @@
 #
 # Project Contributors:
 # ---------------------
-#  Jan Nunez
+#  Jan Nunez - email: theprobingteep@protonmail.com
 #  Claire Ould
 #  Jay Smith - email: CadmusOfThebes@protonmail.com
 #  Chance Warren
