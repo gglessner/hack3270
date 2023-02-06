@@ -10,7 +10,7 @@ Usage: ./CICS-Pen-Testing-Toolkit.py [OPTIONS]
         -o, --offline           Offline log analysis mode
         -h, --help              This help message
 
-Note on command line options:
+Notes on command line options:
 
 The -n (or --name) option determines the name of the SQLite3 log db file that is created.  By default this is 'pentest' and will create pentest.db.  The idea is that each mainframe application penetration test would have a different project name and all of the logs for that test would be written to the same database file.  If you stop the toolkit and then restart it will the same project name it will append to the exiting log .db file.  Setting for the server IP, server port and local proxy port are saved as a configuration in this project .db file and will be setup when opening the project.  You do not need to provide those arguments on the command line when the project .db file already exists.
 
