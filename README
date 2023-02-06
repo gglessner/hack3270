@@ -24,8 +24,8 @@ The -o (or --offline) option selects Offline log analysis mode.  This mode will 
 
 Some initial recommendations under Kali Linux to get going:  
 
-* Currently this tool is only verified to work with KALI Linux (and it is mostly working under MacOS)
-* Use x3270 as your tn3270 terminal!
+* Currently this tool is only verified to work with KALI Linux and Windows 10 (Using Python 3.11.1); however MacOS is currently being tested.
+* Use x3270 (or wx3270 under Windows) as your tn3270 terminal!
 * Select Options->Screen Size->Model 5
 * Select Options->Font and select whichever font that looks good for your screen size
 * Click on the Keyboard icon on the top right of x3270 to display tn3270 keyboard for special keys
