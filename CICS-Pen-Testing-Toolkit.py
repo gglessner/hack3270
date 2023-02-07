@@ -62,6 +62,14 @@ inject_mask_len = 0
 inject_preamble = b''
 inject_postample = b''
 root = tk.Tk()
+style = ttk.Style()
+style.theme_create( "hackallthethings", parent="alt", settings={
+        "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
+        "TNotebook.Tab": {
+            "configure": {"padding": [5, 1], "background": "grey" },
+            "map":       {"background": [("selected", "light grey")],
+                          "expand": [("selected", [1, 1, 1, 0])] } } } )
+style.theme_use("hackallthethings")
 tabControl = ttk.Notebook(root)
 tab1 = tk.Frame(tabControl, background="light grey")
 tab2 = tk.Frame(tabControl, background="light grey")
