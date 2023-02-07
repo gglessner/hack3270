@@ -576,7 +576,6 @@ root.title(NAME + " v"+VERSION)
 
 # Adjust root_height based on platform...
 if platform.system()=="Darwin":
-    root_height = 150
     root.geometry('400x120+'+str(int((screen_width / 2) - 200))+'+0')
 else:
     root.geometry('400x100+'+str(int((screen_width / 2) - 200))+'+0')
