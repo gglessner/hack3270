@@ -64,6 +64,7 @@ inject_postample = b''
 root = tk.Tk()
 style = ttk.Style()
 style.theme_create( "hackallthethings", parent="alt", settings={
+        "TButton": {"configure": {"background": "grey" , "anchor": "center", "relief": "groove"} },
         "Treeview": {"configure": {"background": "white" } },
         "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
         "TNotebook.Tab": {
@@ -619,7 +620,7 @@ tabControl.add(tab5, text ='Help')
 tabControl.pack(expand = 1, fill ="both")
 # Tab : Hack Field Attributes---
 a0 = tk.Label(tab1, text='Hack Fields:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=10)
-hack_button = tk.Button(tab1, text='OFF', width=8, bg='light grey', command=hack_button_pressed)
+hack_button = ttk.Button(tab1, text='OFF', width=8, command=hack_button_pressed)
 hack_button.place(x=20,y=33)
 a2 = tk.Checkbutton(tab1, text='Disable Field Protection', bg='light grey', variable=hack_prot, onvalue=1, offvalue=0, command=hack_toggle).place(x=150, y=0)
 a3 = tk.Checkbutton(tab1, text='Enable Hidden Fields', bg='light grey', variable=hack_hf, onvalue=1, offvalue=0, command=hack_toggle).place(x=150, y=25)
@@ -633,10 +634,10 @@ a9 = tk.Checkbutton(tab1, text='Modify Field', bg='light grey', variable=hack_mf
 b0 = tk.Label(tab2, text='Status:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=12)
 inject_status = tk.Label(tab2, text = 'Not Ready.', bg='light grey')
 inject_status.place(x=23, y=40)
-inject_file_button = tk.Button(tab2, text='FILE', width=5, command=browse_files, bg='light grey').place(x=125, y=2)
-inject_setup_button = tk.Button(tab2, text='SETUP', width=5, command=inject_setup, bg='light grey').place(x=200, y=2)
-inject_button = tk.Button(tab2, text='INJECT', width=5, command=inject_go, bg='light grey').place(x=275, y=2)
-inject_reset_button = tk.Button(tab2, text='RESET', width=5, command=inject_reset, bg='light grey').place(x=350, y=2)
+inject_file_button = ttk.Button(tab2, text='FILE', width=8, command=browse_files).place(x=125, y=2)
+inject_setup_button = ttk.Button(tab2, text='SETUP', width=8, command=inject_setup).place(x=200, y=2)
+inject_button = ttk.Button(tab2, text='INJECT', width=8, command=inject_go).place(x=275, y=2)
+inject_reset_button = ttk.Button(tab2, text='RESET', width=8, command=inject_reset).place(x=350, y=2)
 b1 = tk.Label(tab2, text='Mask:', font="TkDefaultFont 12 underline", bg='light grey').place(x=475, y=9)
 b2 =tk.OptionMenu(tab2, inject_mask, "@","#", "$", "%", '^', '&', '*').place(x=525, y=2)
 b3 = tk.Label(tab2, text='Mode:', font="TkDefaultFont 12 underline", bg='light grey').place(x=600, y=9)
@@ -644,7 +645,7 @@ b4 =tk.OptionMenu(tab2, inject_trunc, "SKIP","TRUNC").place(x=650, y=2)
 b3 = tk.Label(tab2, text='Keys:', font="TkDefaultFont 12 underline", bg='light grey').place(x=750, y=9)
 b4 =tk.OptionMenu(tab2, inject_key, "ENTER","ENTER+CLEAR", "ENTER+PF3+CLEAR").place(x=800, y=2)
 # Tab : Inject Key Presses---
-send_button = tk.Button(tab3, text = 'Send Keys', command=send_keys, bg='light grey').place(x=25, y=12)
+send_button = ttk.Button(tab3, text = 'Send Keys', command=send_keys, width=10).place(x=25, y=12)
 send_label = tk.Label(tab3, text = 'Ready.', bg='light grey')
 send_label.place(x=25, y=50)
 c1 = tk.Checkbutton(tab3, text='NO',variable=aid_no, onvalue=1, offvalue=0, bg='light grey').place(x=150, y=0)
