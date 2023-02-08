@@ -640,7 +640,7 @@ inject_button = ttk.Button(tab2, text='INJECT', width=8, command=inject_go).plac
 inject_reset_button = ttk.Button(tab2, text='RESET', width=8, command=inject_reset).place(x=350, y=2)
 b1 = tk.Label(tab2, text='Mask:', font="TkDefaultFont 12 underline", bg='light grey').place(x=475, y=9)
 b2options = ["@", "#", "$", "%", "^", "&", "*"]
-b2 =ttk.OptionMenu(tab2, inject_mask, b2options[0], *b2options).place(x=525, y=8)
+b2 =ttk.OptionMenu(tab2, inject_mask, b2options[6], *b2options).place(x=525, y=8)
 b3 = tk.Label(tab2, text='Mode:', font="TkDefaultFont 12 underline", bg='light grey').place(x=600, y=9)
 b4options = ["SKIP", "TRUNC"]
 b4 =ttk.OptionMenu(tab2, inject_trunc, b4options[0], *b4options).place(x=650, y=8)
