@@ -64,7 +64,7 @@ inject_postample = b''
 root = tk.Tk()
 style = ttk.Style()
 style.theme_create( "hackallthethings", parent="alt", settings={
-        "TButton": {"configure": {"background": "light grey" , "anchor": "center", "relief": "groove"} },
+        "TButton": {"configure": {"background": "light grey" , "anchor": "center", "relief": "solid"} },
         "Treeview": {"configure": {"background": "white" } },
         "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
         "TNotebook.Tab": {
