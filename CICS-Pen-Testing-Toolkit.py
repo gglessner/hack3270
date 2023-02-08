@@ -639,11 +639,14 @@ inject_setup_button = ttk.Button(tab2, text='SETUP', width=8, command=inject_set
 inject_button = ttk.Button(tab2, text='INJECT', width=8, command=inject_go).place(x=275, y=2)
 inject_reset_button = ttk.Button(tab2, text='RESET', width=8, command=inject_reset).place(x=350, y=2)
 b1 = tk.Label(tab2, text='Mask:', font="TkDefaultFont 12 underline", bg='light grey').place(x=475, y=9)
-b2 =tk.OptionMenu(tab2, inject_mask, "@","#", "$", "%", '^', '&', '*').place(x=525, y=2)
+b2options = ["@", "#", "$", "%", "^", "&", "*"]
+b2 =ttk.OptionMenu(tab2, inject_mask, b2options[0], *b2options).place(x=525, y=8)
 b3 = tk.Label(tab2, text='Mode:', font="TkDefaultFont 12 underline", bg='light grey').place(x=600, y=9)
-b4 =tk.OptionMenu(tab2, inject_trunc, "SKIP","TRUNC").place(x=650, y=2)
-b3 = tk.Label(tab2, text='Keys:', font="TkDefaultFont 12 underline", bg='light grey').place(x=750, y=9)
-b4 =tk.OptionMenu(tab2, inject_key, "ENTER","ENTER+CLEAR", "ENTER+PF3+CLEAR").place(x=800, y=2)
+b4options = ["SKIP", "TRUNC"]
+b4 =ttk.OptionMenu(tab2, inject_trunc, b4options[0], *b4options).place(x=650, y=8)
+b5 = tk.Label(tab2, text='Keys:', font="TkDefaultFont 12 underline", bg='light grey').place(x=750, y=9)
+b6options = ["ENTER", "ENTER+CLEAR", "ENTER+PF3+CLEAR"]
+b6 =ttk.OptionMenu(tab2, inject_key, b6options[0], *b6options).place(x=800, y=8)
 # Tab : Inject Key Presses---
 send_button = ttk.Button(tab3, text = 'Send Keys', command=send_keys, width=10).place(x=25, y=12)
 send_label = tk.Label(tab3, text = 'Ready.', bg='light grey')
