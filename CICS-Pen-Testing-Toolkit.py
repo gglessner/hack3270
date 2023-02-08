@@ -69,7 +69,7 @@ style.theme_create( "hackallthethings", parent="alt", settings={
         "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
         "TNotebook.Tab": {
             "configure": {"padding": [5, 1], "background": "light grey" },
-            "map":       {"background": [("selected", "light grey")],
+            "map":       {"background": [("selected", "light grey"), ('disabled','dark grey')], 
                           "expand": [("selected", [1, 1, 1, 0])] } } } )
 style.theme_use("hackallthethings")
 tabControl = ttk.Notebook(root)
