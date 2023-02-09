@@ -87,7 +87,8 @@ hack_sa = tk.IntVar(value = 1)
 hack_mf = tk.IntVar(value = 1)
 hack_hf = tk.IntVar(value = 1)
 hack_rnr = tk.IntVar(value = 1)
-hack_ei = tk.IntVar(value = 1)
+hack_ei = tk.IntVar(value = 0)
+hack_hv = tk.IntVar(value = 0)
 aid_no = tk.IntVar(value = 1)
 aid_qreply = tk.IntVar(value = 1)
 aid_enter = tk.IntVar(value = 0)
@@ -326,7 +327,7 @@ def tend_server():
             server_data = server.recv(BUFFER_MAX)
             if len(server_data) > 0:
                 if hack_on:
-                    hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get())
+                    hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
                     client.send(hacked_server)
                     write_log('S', 'Hack Field Attributes: ENABLED (' +
                             'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
@@ -336,7 +337,8 @@ def tend_server():
                           'SFE: ' + str(hack_sfe.get()) + " - " +
                           'SA: ' + str(hack_sa.get()) + " - " +
                           'MF: ' + str(hack_mf.get()) + " - " +
-                          'EI: ' + str(hack_ei.get()) +
+                          'EI: ' + str(hack_ei.get()) + " - " +
+                          'HV: ' + str(hack_hv.get()) +
                           ')', hacked_server)
                 else:
                     client.send(server_data)
@@ -634,6 +636,7 @@ a8 = tk.Checkbutton(tab1, text='Set Attribute', bg='light grey', variable=hack_s
 a9 = tk.Checkbutton(tab1, text='Modify Field', bg='light grey', variable=hack_mf, onvalue=1, offvalue=0, command=hack_toggle).place(x=700, y=50)
 a10 = tk.Label(tab1, text='Hidden Field Highlighting:', font="TkDefaultFont 12 underline", bg='light grey').place(x=900, y=2)
 a11 = tk.Checkbutton(tab1, text='Enable Intensity', bg='light grey', variable=hack_ei, onvalue=1, offvalue=0, command=hack_toggle).place(x=900, y=25)
+a12 = tk.Checkbutton(tab1, text='High Visibility', bg='light grey', variable=hack_hv, onvalue=1, offvalue=0, command=hack_toggle).place(x=900, y=50)
 # Tab : Inject Into Fields---
 b0 = tk.Label(tab2, text='Status:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=12)
 inject_status = tk.Label(tab2, text = 'Not Ready.', bg='light grey')
@@ -805,7 +808,7 @@ while True:
                 print(bytes(server_data))
                 print(lib3270.get_ascii(server_data))
             if hack_on:
-                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get())
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
                 write_log('S', 'Hack Field Attributes: ENABLED (' +
                         'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
                         'Show Hidden: ' + str(hack_hf.get()) + " - " +
@@ -813,7 +816,9 @@ while True:
                         'SF: ' + str(hack_sf.get()) + " - " +
                         'SFE: ' + str(hack_sfe.get()) + " - " +
                         'SA: ' + str(hack_sa.get()) + " - " +
-                        'MF: ' + str(hack_mf.get()) +
+                        'MF: ' + str(hack_mf.get()) + " - " +
+                        'EI: ' + str(hack_ei.get()) + " - " +
+                        'HV: ' + str(hack_hv.get()) +
                         ')', hacked_server)
                 client.send(hacked_server)
             else:
@@ -824,7 +829,7 @@ while True:
     if hack_toggled:
         if len(server_data) > 0:
             if hack_on:
-                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get())
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
                 write_log('S', 'Hack Field Attributes: TOGGLED ON (' +
                         'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
                         'Show Hidden: ' + str(hack_hf.get()) + " - " +
@@ -832,7 +837,9 @@ while True:
                         'SF: ' + str(hack_sf.get()) + " - " +
                         'SFE: ' + str(hack_sfe.get()) + " - " +
                         'SA: ' + str(hack_sa.get()) + " - " +
-                        'MF: ' + str(hack_mf.get()) +
+                        'MF: ' + str(hack_mf.get()) + " - " +
+                        'EI: ' + str(hack_ei.get()) + " - " +
+                        'HV: ' + str(hack_hv.get()) +
                         ')', hacked_server)
                 client.send(hacked_server)
             else:
