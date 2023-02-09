@@ -82,7 +82,7 @@ def server_connect(window, ip, port, tls_enabled):
     window.update()
     return(server)
 
-def flip_bits(passed_value, hack_prot, hack_hf, hack_rnr):
+def flip_bits(passed_value, hack_prot, hack_hf, hack_rnr, hack_ei):
     value = passed_value
     # Turn of 'Protected' Flag (Bit 6) if Set
     if hack_prot:
@@ -91,14 +91,26 @@ def flip_bits(passed_value, hack_prot, hack_hf, hack_rnr):
     # Turn off 'Non-display' Flag (Bit 4) if Set (i.e. Bits 3 and 4 are on)
     if hack_hf:
         if value & 0b00001100 == 0b00001100:
-            value ^= 0b00001000
+	# Flip bit 3 instead of 4 if enable intentisty is selected
+            if hack_ei:
+                value ^= 0b00000100
+            else:
+                value ^= 0b00001000
     # Turn off 'Numeric Only' Flag (Bit 5) if Set
     if hack_rnr:
         if value & 0b00010000 == 0b00010000:
             value ^= 0b00010000
     return(value)
 
-def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack_hf, hack_rnr):
+def check_hidden(passed_value):
+    if passed_value & 0b00001100 == 0b00001100:
+        return True
+    else:
+        return False
+
+def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack_hf, hack_rnr, hack_ei, hack_hv):
+    found_hidden_data = 0
+
     if len(passed_data) < 90:
         return(passed_data)
     data = bytearray(len(passed_data))
@@ -106,25 +118,34 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack
     for x in range(len(data)):
         if hack_sf and data[x] == 0x1d: # Start Field
                 value = data[x + 1]
-                data[x + 1] = flip_bits(data[x + 1], hack_prot, hack_hf, hack_rnr)
+                data[x + 1] = flip_bits(data[x + 1], hack_prot, hack_hf, hack_rnr, hack_ei)
         elif hack_sfe and data[x] == 0x29: # Start Field Extended
             for y in range(data[x + 1]):
                 if(len(data) < ((x + 3) + (y * 2))):
                     continue
                 if data[((x + 3) + (y * 2)) - 1] == 0xc0:
-                    data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr)
+                    if check_hidden(data[((x + 3) + (y * 2))]) and hack_hv:
+                        found_hidden_data = 1
+                    data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr, hack_ei)
+            if found_hidden_data:
+                data[x + 1] = data[x + 1] + 2
+                data2 = bytearray(len(data) + 4)
+                data2 = data[:x + (data[x + 1] * 2) - 2] + b'\x41\xf2\x42\xf6' + data[x + (data[x + 1] * 2) - 2:]
+                data = data2
+                x = x + 4
+                found_hidden_data = 0
             continue
         elif hack_sa and data[x] == 0x28: # Set Attribute
             if(len(data) < x + 3):
                 continue
             if data[x + 2] == 0xc0: # Basic 3270 field attributes
-                data[x + 3] = flip_bits(data[x + 3], hack_prot, hack_hf, hack_rnr)
+                data[x + 3] = flip_bits(data[x + 3], hack_prot, hack_hf, hack_rnr, hack_ei)
             continue
         elif hack_mf and data[x] == 0x2c: # Modify Field
             for y in range(data[x + 1]):
                 if(len(data) < ((x + 3) + (y * 2))):
                     continue
                 if data[((x + 3) + (y * 2)) - 1] == 0xc0: # Basic 3270 field attributes
-                    data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr)
+                    data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr, hack_ei)
             continue
     return(data)
