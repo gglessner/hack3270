@@ -39,7 +39,7 @@ from pathlib import Path
 from tkinter import font
 
 NAME = "CICS-Pen-Testing-Toolkit"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
