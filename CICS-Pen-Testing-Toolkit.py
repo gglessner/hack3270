@@ -254,16 +254,10 @@ def inject_go():
             root.update()
             tend_server()
         if inject_key.get() == 'ENTER+CLEAR':
-            write_log('C', 'Sending CLEAR', b'\x6d\xff\xef')
-            server.send(b'\x6d\xff\xef') # CLEAR
-            tend_server()
+            send_key('CLEAR', b'\x6d')
         elif inject_key.get() == 'ENTER+PF3+CLEAR':
-            write_log('C', 'Sending PF3', b'\xf3\xff\xef')
-            server.send(b'\xf3\xff\xef') # PF3
-            tend_server()
-            write_log('C', 'Sending CLEAR', b'\x6d\xff\xef')
-            server.send(b'\x6d\xff\xef') # CLEAR
-            tend_server()
+            send_key('PF3', b'\xf3')
+            send_key('CLEAR', b'\x6d')
     injections.close()
     tabControl.tab(0, state="normal")
     tabControl.tab(2, state="normal")
@@ -321,7 +315,7 @@ def tend_server():
     global server, hack_on, hack_prot, hack_hf, hack_rnr, hack_sf, hack_sfe, hack_sa, hack_mf
 
     while True:
-        my_rlist, w, e = select.select([server], [], [], 0.5)
+        my_rlist, w, e = select.select([server], [], [], 1)
         if server in my_rlist:
             server_data = server.recv(BUFFER_MAX)
             if len(server_data) > 0:
@@ -352,7 +346,10 @@ def send_key(send_text, byte_code):
     send_label["text"] = 'Send: ' + send_text
     root.update()
     write_log('C', 'Sending: ' + send_text, byte_code + b'\xff\xef')
+    # MVS Version
     server.send(byte_code + b'\xff\xef')
+    # zOS Version 
+    # server.send(byte_code + b'\x00\x00\x00\x00' + byte_code + b'\xff\xef')
     tend_server()
     return
 
