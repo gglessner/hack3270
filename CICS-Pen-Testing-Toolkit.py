@@ -47,7 +47,6 @@ PROXY_IP = "127.0.0.1"
 PROXY_PORT = 3271
 TLS_ENABLED = 0
 BUFFER_MAX = 10000
-root_width = 1800
 root_height = 100
 client_data = []
 server_data = []
@@ -581,9 +580,9 @@ root.title(NAME + " v"+VERSION)
 
 # Adjust root_height based on platform...
 if platform.system()=="Darwin":
-    root.geometry('400x120+'+str(int((screen_width / 2) - 200))+'+0')
+    root.geometry(str(int(screen_width / 2))+'x120+'+str(int((screen_width / 4)))+'+0')
 else:
-    root.geometry('400x100+'+str(int((screen_width / 2) - 200))+'+0')
+    root.geometry(str(int(screen_width / 2))+'x100+'+str(int((screen_width / 4)))+'+0')
 
 client = lib3270.client_connect(frame, PROXY_IP, PROXY_PORT)
 if not offline_mode:
