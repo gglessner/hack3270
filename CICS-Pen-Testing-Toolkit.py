@@ -349,7 +349,7 @@ def send_key(send_text, byte_code):
     # MVS Version
     server.send(byte_code + b'\xff\xef')
     # zOS Version 
-    # server.send(byte_code + b'\x00\x00\x00\x00' + byte_code + b'\xff\xef')
+    # server.send(b'\x00\x00\x00\x00\x01' + byte_code + b'\xff\xef')
     tend_server()
     return
 
