@@ -35,11 +35,12 @@ import time
 import datetime
 import signal
 import platform
+import re
 from pathlib import Path
 from tkinter import font
 
 NAME = "CICS-Pen-Testing-Toolkit"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
@@ -128,6 +129,7 @@ inject_clear = tk.IntVar(value = 0)
 inject_mask = tk.StringVar(value = '*')
 inject_key = tk.StringVar(value = 'ENTER')
 inject_trunc = tk.StringVar(value = 'SKIP')
+inject_3270e = True
 EXIT_LOOP = 0
 hack_toggled = 0
 last_db_id = 0
@@ -314,9 +316,11 @@ def aid_setdef():
 def tend_server():
     global server, hack_on, hack_prot, hack_hf, hack_rnr, hack_sf, hack_sfe, hack_sa, hack_mf
 
+    my_select_timeout = 1
     while True:
-        my_rlist, w, e = select.select([server], [], [], 1)
+        my_rlist, w, e = select.select([server], [], [], my_select_timeout)
         if server in my_rlist:
+            my_select_timeout = 0.2
             server_data = server.recv(BUFFER_MAX)
             if len(server_data) > 0:
                 if hack_on:
@@ -341,15 +345,15 @@ def tend_server():
     return
 
 def send_key(send_text, byte_code):
-    global server, send_label
+    global server, send_label, inject_3270e
 
     send_label["text"] = 'Send: ' + send_text
     root.update()
     write_log('C', 'Sending: ' + send_text, byte_code + b'\xff\xef')
-    # MVS Version
-    server.send(byte_code + b'\xff\xef')
-    # zOS Version 
-    # server.send(byte_code + b'\x00\x00\x00\x00' + byte_code + b'\xff\xef')
+    if inject_3270e:
+        server.send(byte_code + b'\x00\x00\x00\x00' + byte_code + b'\xff\xef')
+    else:
+        server.send(byte_code + b'\xff\xef')
     tend_server()
     return
 
@@ -476,6 +480,56 @@ def expand_CS(text):
     elif text == "S":
         return("Server")
 
+def parse_telnet(ebcdic_string):
+    return_string = re.sub('\\[0xFF\\]', '[IAC]', ebcdic_string)
+    return_string = re.sub('\\[0xFE\\]', '[DON\'T]', return_string)
+    return_string = re.sub('\\[0xFD\\]', '[DO]', return_string)
+    return_string = re.sub('\\[0xFC\\]', '[WON\'T]', return_string)
+    return_string = re.sub('\\[0xFB\\]', '[WILL]', return_string)
+    return_string = re.sub('\\[0xFA\\]', '[SB]', return_string)
+    return_string = re.sub('\\[0x29\\]', '[3270-REGIME]', return_string)
+    return_string = re.sub('\\[0x18\\]', '[TERMINAL-TYPE]', return_string)
+    return_string = re.sub('\\[0x19\\]', '[END-OF-RECORD]', return_string)
+    return_string = re.sub('\\[0x28\\]', '[TN3270E]', return_string)
+    return_string = re.sub('\\[0x01\\]', '[SEND]', return_string)
+    return_string = re.sub('\\[DO\\]\\[0x00\\]', '[DO][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[DON\'T\\]\\[0x00\\]', '[DON\'T][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[WILL\\]\\[0x00\\]', '[WILL][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[WON\'T\\]\\[0x00\\]', '[WON\'T][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[0x00\\]', '[IS]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x32\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-2-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x33\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-3-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x34\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-4-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x35\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-5-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x44\\]\\[0x59\\]\\[0x4E\\]\\[0x41\\]\\[0x4D\\]\\[0x49\\]\\[0x43\\]', '[IBM-3270-DYNAMIC]', return_string)
+    return_string = re.sub('\\[TN3270E\\]\\[0x08\\]\\[0x02\\]', '[TN3270E][SEND][DEVICE-TYPE]', return_string)
+    return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x07\\]', '[TN3270E][DEVICE-TYPE][REQUEST]', return_string)
+    return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x04\\]', '[TN3270E][DEVICE-TYPE][IS]', return_string)
+    return_string = re.sub('\\]0$', '][SE]', return_string)
+    return(return_string)
+
+def parse_3270(ebcdic_string, raw_data):
+    return_string = re.sub('\\[0x29\\]', '\n[Start Field Extended]', ebcdic_string)
+    return_string = re.sub('{', '[Basic Field Attribute]', return_string)
+    return_string = re.sub('\\[0x41\\]\\[0x00\\]', '[Highlighting - Default]', return_string)
+    return_string = re.sub('\\[0x41\\]0', '[Highlighting - Normal]', return_string)
+    return_string = re.sub('\\[0x41\\]1', '[Highlighting - Blink]', return_string)
+    return_string = re.sub('\\[0x41\\]2', '[Highlighting - Reverse]', return_string)
+    return_string = re.sub('\\[0x41\\]4', '[Highlighting - Underscore]', return_string)
+    return_string = re.sub('\\[0x41\\]8', '[Highlighting - Intensity]', return_string)
+    return_string = re.sub('\\[0x42\\]\\[0x00\\]', '[Color - Default]', return_string)
+    return_string = re.sub('\\[0x42\\]0', '[Color - Neutral/Black]', return_string)
+    return_string = re.sub('\\[0x42\\]1', '[Color - Blue]', return_string)
+    return_string = re.sub('\\[0x42\\]2', '[Color - Red]', return_string)
+    return_string = re.sub('\\[0x42\\]3', '[Color - Pink]', return_string)
+    return_string = re.sub('\\[0x42\\]4', '[Color - Green]', return_string)
+    return_string = re.sub('\\[0x42\\]5', '[Color - Yellow]', return_string)
+    return_string = re.sub('\\[0x42\\]6', '[Color - Yellow]', return_string)
+    return_string = re.sub('\\[0x42\\]7', '[Color - Neutral/White]', return_string)
+    return_string = re.sub('\\[0x11\\]', '[Move Cursor Position]', return_string)
+    return_string = re.sub('\\[Basic Field Attribute\\] \\[ ', '[Basic Field Attribute][0x40][', return_string)
+    return(return_string)
+
 def fetch_item(a):
     global sql_cur, treev, d1, client
 
@@ -491,12 +545,15 @@ def fetch_item(a):
         ebcdic_data = lib3270.get_ascii(row[5])
         d1.config(state='normal')
         d1.delete('1.0', tk.END)
-        d1.insert(tk.INSERT, ebcdic_data)
+        if re.search("^tn3270 ", row[3]):
+            parsed_3270 = parse_telnet(ebcdic_data)
+        else:
+            parsed_3270 = parse_3270(ebcdic_data, row[5])
+        d1.insert(tk.INSERT, parsed_3270)
         d1.config(state='disabled')
         root.update()
         if record_cs == "Server":
             client.send(row[5])
-
     return
 
 # Main start---
@@ -596,6 +653,32 @@ while True:
     if EXIT_LOOP:
         break
 
+def check_inject_3270e():
+    global sql_cur
+
+    sql_text = "SELECT * FROM Logs WHERE ID=1"
+    sql_cur.execute(sql_text)
+    records = sql_cur.fetchall()
+    for row in records:
+        # If the third character is 
+        if row[5][2] == 24:
+            return False
+        else:
+            return True
+
+def check_record(record_id):
+    global sql_cur
+
+    sql_text = "SELECT * FROM Logs WHERE ID=" + str(record_id)
+    sql_cur.execute(sql_text)
+    records = sql_cur.fetchall()
+    for row in records:
+        # If the first character is 0xFF then this is a telnet handshake message
+        if row[5][0] == 255:
+            return True
+        else:
+            return False
+
 def play_record(record_id):
     global sql_cur, client
 
@@ -607,9 +690,12 @@ def play_record(record_id):
         client.recv(BUFFER_MAX)
 
 if offline_mode:
-    play_record(1)
-    play_record(3)
-    play_record(5)
+    my_record_num = 1
+    while check_record(my_record_num):
+        play_record(my_record_num)
+        my_record_num = my_record_num + 2
+    else:
+        inject_3270e = check_inject_3270e()
 
 # Tabs---
 tabControl.add(tab1, text ='Hack Field Attributes')
