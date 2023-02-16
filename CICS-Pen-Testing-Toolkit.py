@@ -40,7 +40,7 @@ from pathlib import Path
 from tkinter import font
 
 NAME = "CICS-Pen-Testing-Toolkit"
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
@@ -350,9 +350,11 @@ def send_key(send_text, byte_code):
     send_label["text"] = 'Send: ' + send_text
     root.update()
     write_log('C', 'Sending: ' + send_text, byte_code + b'\xff\xef')
-    if inject_3270e:
+    if inject_3270e == True:
+        print("Sending as 3270E: " + send_text)
         server.send(b'\x00\x00\x00\x00\x01' + byte_code + b'\xff\xef')
     else:
+        print("Sending as 3270: " + send_text)
         server.send(byte_code + b'\xff\xef')
     tend_server()
     return
@@ -661,10 +663,25 @@ def check_inject_3270e():
     records = sql_cur.fetchall()
     for row in records:
         # If the third character is 
-        if row[5][2] == 24:
-            return False
+        if row[5][2] == 40:
+            print("TN3270E Detected.")
+            return True 
         else:
+            print("TN3270 Detected.")
+            return False
+
+def check_server(record_id):
+    global sql_cur
+
+    sql_text = "SELECT * FROM Logs WHERE ID=" + str(record_id)
+    sql_cur.execute(sql_text)
+    records = sql_cur.fetchall()
+    for row in records:
+        # If the first character is 0xFF then this is a telnet handshake message
+        if row[2] == "S":
             return True
+        else:
+            return False
 
 def check_record(record_id):
     global sql_cur
@@ -687,15 +704,21 @@ def play_record(record_id):
     records = sql_cur.fetchall()
     for row in records:
         client.send(row[5])
-        client.recv(BUFFER_MAX)
 
 if offline_mode:
+    print("Offline mode enabled.")
     my_record_num = 1
     while check_record(my_record_num):
-        play_record(my_record_num)
-        my_record_num = my_record_num + 2
-    else:
-        inject_3270e = check_inject_3270e()
+        if check_server(my_record_num) == True:
+            print("Playing server message: " + str(my_record_num))
+            play_record(my_record_num)
+        else:
+            print("Waiting for message from client.")
+            client.recv(BUFFER_MAX)
+        my_record_num = my_record_num + 1
+    print("Telnet negotiation complete.")
+else:
+    inject_3270e = check_inject_3270e()
 
 # Tabs---
 tabControl.add(tab1, text ='Hack Field Attributes')
