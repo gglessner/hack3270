@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-# CICS-Pen-Testing-Toolkit
+# Hack3270
+# The TN3270 Penetration Toolkit
 # Copyright Garland Glessner (2022-2023)
 # Contact email: gglessner@gmail.com
 #
@@ -39,8 +40,8 @@ import re
 from pathlib import Path
 from tkinter import font
 
-NAME = "CICS-Pen-Testing-Toolkit"
-VERSION = "1.1.3"
+NAME = "hack3270"
+VERSION = "1.1.4"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
