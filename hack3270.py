@@ -69,8 +69,8 @@ style.theme_create( "hackallthethings", parent="alt", settings={
         "Treeview": {"configure": {"background": "white" } },
         "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
         "TNotebook.Tab": {
-            "configure": {"padding": [5, 1], "background": "grey" },
-            "map":       {"background": [("selected", "light grey"), ('disabled','dark grey')], 
+            "configure": {"padding": [5, 1], "background": "dark grey" },
+            "map":       {"background": [("selected", "light grey"), ('disabled','grey')], 
                           "expand": [("selected", [1, 1, 1, 0])] } } } )
 style.theme_use("hackallthethings")
 tabControl = ttk.Notebook(root)
