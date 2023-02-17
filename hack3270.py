@@ -446,28 +446,8 @@ def write_log(direction, notes, data):
     global sql_con, sql_cur, treev, last_db_id, message_count
 
     message_count = message_count + 1
-    if message_count == 1:
-        notes = notes + "tn3270 handshake - Initial connection"
-    elif message_count == 2:
-        notes = notes + "tn3270 handshake - Initial connection - client response"
-    elif message_count == 3:
-        notes = notes + "tn3270 handshake - Settings negotiation"
-    elif message_count == 4:
-        if data[13] == 0x35:
-            notes = notes + "tn3270 handshake - Settings negotiation - Screen Size: Model 5 (132x27)"
-        elif data[13] == 0x34:
-            notes = notes + "tn3270 handshake - Settings negotiation - Screen Size: Model 4 (80x43)"
-        elif data[13] == 0x33:
-            notes = notes + "tn3270 handshake - Settings negotiation - Screen Size: Model 3 (80x32)"
-        elif data[13] == 0x32:
-            notes = notes + "tn3270 handshake - Settings negotiation - Screen Size: Model 2 (80x24)"
-        else:
-            # Byte count will probably also be 17 instead of 18
-            notes = notes + "tn3270 handshake - Settings negotiation - Screen Size: Oversized"
-    elif message_count == 5:
-        notes = notes + "tn3270 handshake"
-    elif message_count == 6:
-        notes = notes + "tn3270 handshake"
+    if data[0] == 255:
+        notes = notes + "tn3270 negotiation"
 
     log_time = time.time()
     sql_cur.execute("INSERT INTO Logs ('TIMESTAMP', 'C_S', 'NOTES', 'DATA_LEN', 'RAW_DATA') VALUES (?, ?, ?, ?, ?)", (str(log_time), direction, notes, str(len(data)), sqlite3.Binary(data)))
