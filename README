@@ -43,7 +43,7 @@ Notes on use with DVCA:
 * Ideally, this would be perfomed on a KALI laptop and DVCA will be listening on 127.0.0.1:3270
 * Since 3270 is the default port for the CICS Pen Testing Toolkit, you only need to specify the -i option.  For this example, we will also use -n dvca to create a project log SQLite3 file named dvca.db
 
-	./CICS-Pen-Testing-Toolkit-v1.0.2.py -i 127.0.0.1 -n dvca
+	./hack3270.py -i 127.0.0.1 -n dvca
 
 * A window should appear saying that the tool is waiting for a connetion on port 3271
 * Use x3270 and connect to 127.0.0.1 port 3271
