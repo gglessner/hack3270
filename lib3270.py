@@ -115,7 +115,6 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack
         return(passed_data)
     data = bytearray(len(passed_data))
     data[:] = passed_data
-    print("MF: " + str(hack_mf))
     for x in range(len(data)):
         if hack_sf and data[x] == 0x1d: # Start Field
                 value = data[x + 1]
