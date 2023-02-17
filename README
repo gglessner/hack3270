@@ -1,6 +1,6 @@
-Documentation for CICS-Pen-Testing-Toolkit
+Documentation for hack3270
 
-Usage: ./CICS-Pen-Testing-Toolkit.py [OPTIONS]
+Usage: ./hack3270.py [OPTIONS]
 
         -n, --name              Project name [Default: pentest]
         -i, --ip                Server IP address
@@ -54,7 +54,7 @@ Notes on use with DVCA:
 	Connected to Server: 127.0.0.1:3270
 	Click to Continue
 
-* Click the button and the full CICS Pen Testing Toolkit GUI should launch
+* Click the button and the full hack3270 GUI should launch
 * The x3270 terminal will update with a logon screen
 * Logon with DVCA password DVCA
 * If the DVCA user is already logged in, type LOGON DVCA RECONNECT then the password to reconnect to the previous logon
