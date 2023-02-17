@@ -41,7 +41,7 @@ Notes on use with DVCA:
 	sudo docker run -p 3270:3270 --expose=3270 mainframed767/dvca
 
 * Ideally, this would be perfomed on a KALI laptop and DVCA will be listening on 127.0.0.1:3270
-* Since 3270 is the default port for the CICS Pen Testing Toolkit, you only need to specify the -i option.  For this example, we will also use -n dvca to create a project log SQLite3 file named dvca.db
+* Since 3270 is the default port for hack3270, you only need to specify the -i option.  For this example, we will also use -n dvca to create a project log SQLite3 file named dvca.db
 
 	./hack3270.py -i 127.0.0.1 -n dvca
 
