@@ -143,10 +143,12 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack
                 found_hidden_data = 0
             continue
         elif hack_sa and data[x] == 0x28: # Set Attribute
-            if(len(data) < x + 3):
-                continue
-            if data[x + 2] == 0xc0: # Basic 3270 field attributes
-                data[x + 3] = flip_bits(data[x + 3], hack_prot, hack_hf, hack_rnr, hack_ei)
+            if data[x + 1] == 0x42: # Color
+                if data[x + 2] == 0xf8 and hack_hv: # Black
+                    data2 = bytearray(len(data) + 6)
+                    data2 = data[:x + 3] + b'\x28\x41\xf2\x28\x42\xf6' + data[x + 3:]
+                    data = data2
+                    x = x + 6
             continue
         elif hack_mf and data[x] == 0x2c: # Modify Field
             for y in range(data[x + 1]):
