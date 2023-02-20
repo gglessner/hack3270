@@ -41,7 +41,7 @@ from pathlib import Path
 from tkinter import font
 
 NAME = "hack3270"
-VERSION = "1.1.4"
+VERSION = "1.1.5"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
