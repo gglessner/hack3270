@@ -108,7 +108,7 @@ def check_hidden(passed_value):
     else:
         return False
 
-def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack_hf, hack_rnr, hack_ei, hack_hv):
+def manipulate(passed_data, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack_rnr, hack_ei, hack_hv):
     found_hidden_data = 0
 
     if passed_data[0] == 255:
@@ -142,14 +142,14 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_sa, hack_mf, hack_prot, hack
                 x = x + 4
                 found_hidden_data = 0
             continue
-        elif hack_sa and data[x] == 0x28: # Set Attribute
-            if data[x + 1] == 0x42: # Color
-                if data[x + 2] == 0xf8 and hack_hv: # Black
-                    data2 = bytearray(len(data) + 6)
-                    data2 = data[:x + 3] + b'\x28\x41\xf2\x28\x42\xf6' + data[x + 3:]
-                    data = data2
-                    x = x + 6
-            continue
+#        elif hack_sa and data[x] == 0x28: # Set Attribute
+#            if data[x + 1] == 0x42: # Color
+#                if data[x + 2] == 0xf8 and hack_hv: # Black
+#                    data2 = bytearray(len(data) + 6)
+#                    data2 = data[:x + 3] + b'\x28\x41\xf2\x28\x42\xf6' + data[x + 3:]
+#                    data = data2
+#                    x = x + 6
+#            continue
         elif hack_mf and data[x] == 0x2c: # Modify Field
             for y in range(data[x + 1]):
                 if(len(data) < ((x + 3) + (y * 2))):

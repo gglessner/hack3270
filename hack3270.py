@@ -84,7 +84,6 @@ screen_height = root.winfo_screenheight()
 hack_prot = tk.IntVar(value = 1)
 hack_sf = tk.IntVar(value = 1)
 hack_sfe = tk.IntVar(value = 1)
-hack_sa = tk.IntVar(value = 1)
 hack_mf = tk.IntVar(value = 1)
 hack_hf = tk.IntVar(value = 1)
 hack_rnr = tk.IntVar(value = 1)
@@ -315,7 +314,7 @@ def aid_setdef():
     return
 
 def tend_server():
-    global server, hack_on, hack_prot, hack_hf, hack_rnr, hack_sf, hack_sfe, hack_sa, hack_mf
+    global server, hack_on, hack_prot, hack_hf, hack_rnr, hack_sf, hack_sfe, hack_mf
 
     my_select_timeout = 1
     while True:
@@ -325,7 +324,7 @@ def tend_server():
             server_data = server.recv(BUFFER_MAX)
             if len(server_data) > 0:
                 if hack_on:
-                    hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
+                    hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
                     client.send(hacked_server)
                     write_log('S', 'Hack Field Attributes: ENABLED (' +
                             'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
@@ -333,7 +332,6 @@ def tend_server():
                           'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" +
                           'SF: ' + str(hack_sf.get()) + " - " +
                           'SFE: ' + str(hack_sfe.get()) + " - " +
-                          'SA: ' + str(hack_sa.get()) + " - " +
                           'MF: ' + str(hack_mf.get()) + " - " +
                           'EI: ' + str(hack_ei.get()) + " - " +
                           'HV: ' + str(hack_hv.get()) +
@@ -493,6 +491,7 @@ def parse_telnet(ebcdic_string):
 
 def parse_3270(ebcdic_string, raw_data):
     return_string = re.sub('\\[0x29\\]', '\n[Start Field Extended]', ebcdic_string)
+    return_string = re.sub('\\[0x28\\]', '[Set Attribute]', return_string)
     return_string = re.sub('{', '[Basic Field Attribute]', return_string)
     return_string = re.sub('\\[0x41\\]\\[0x00\\]', '[Highlighting - Default]', return_string)
     return_string = re.sub('\\[0x41\\]0', '[Highlighting - Normal]', return_string)
@@ -715,14 +714,12 @@ hack_button.place(x=20,y=33)
 a2 = tk.Checkbutton(tab1, text='Disable Field Protection', bg='light grey', variable=hack_prot, onvalue=1, offvalue=0, command=hack_toggle).place(x=150, y=0)
 a3 = tk.Checkbutton(tab1, text='Enable Hidden Fields', bg='light grey', variable=hack_hf, onvalue=1, offvalue=0, command=hack_toggle).place(x=150, y=25)
 a4 = tk.Checkbutton(tab1, text='Remove Numeric Only Restrictions', bg='light grey', variable=hack_rnr, onvalue=1, offvalue=0, command=hack_toggle).place(x=150, y=50)
-a5 = tk.Label(tab1, text='Fields Types:', font="TkDefaultFont 12 underline", bg='light grey').place(x=610, y=2)
-a6 = tk.Checkbutton(tab1, text='Start Field', bg='light grey', variable=hack_sf, onvalue=1, offvalue=0, command=hack_toggle).place(x=500, y=25)
-a7 = tk.Checkbutton(tab1, text='Start Field Extended', bg='light grey', variable=hack_sfe, onvalue=1, offvalue=0, command=hack_toggle).place(x=500, y=50)
-a8 = tk.Checkbutton(tab1, text='Set Attribute', bg='light grey', variable=hack_sa, onvalue=1, offvalue=0, command=hack_toggle).place(x=700, y=25)
-a9 = tk.Checkbutton(tab1, text='Modify Field', bg='light grey', variable=hack_mf, onvalue=1, offvalue=0, command=hack_toggle).place(x=700, y=50)
-a10 = tk.Label(tab1, text='Hidden Field Highlighting:', font="TkDefaultFont 12 underline", bg='light grey').place(x=900, y=2)
-a11 = tk.Checkbutton(tab1, text='Enable Intensity', bg='light grey', variable=hack_ei, onvalue=1, offvalue=0, command=hack_toggle).place(x=900, y=25)
-a12 = tk.Checkbutton(tab1, text='High Visibility', bg='light grey', variable=hack_hv, onvalue=1, offvalue=0, command=hack_toggle).place(x=900, y=50)
+a6 = tk.Checkbutton(tab1, text='Start Field', bg='light grey', variable=hack_sf, onvalue=1, offvalue=0, command=hack_toggle).place(x=420, y=2)
+a7 = tk.Checkbutton(tab1, text='Start Field Extended', bg='light grey', variable=hack_sfe, onvalue=1, offvalue=0, command=hack_toggle).place(x=420, y=25)
+a9 = tk.Checkbutton(tab1, text='Modify Field', bg='light grey', variable=hack_mf, onvalue=1, offvalue=0, command=hack_toggle).place(x=420, y=50)
+a10 = tk.Label(tab1, text='Hidden Field Highlighting:', font="TkDefaultFont 12 underline", bg='light grey').place(x=600, y=2)
+a11 = tk.Checkbutton(tab1, text='Enable Intensity', bg='light grey', variable=hack_ei, onvalue=1, offvalue=0, command=hack_toggle).place(x=600, y=25)
+a12 = tk.Checkbutton(tab1, text='High Visibility', bg='light grey', variable=hack_hv, onvalue=1, offvalue=0, command=hack_toggle).place(x=600, y=50)
 # Tab : Inject Into Fields---
 b0 = tk.Label(tab2, text='Status:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=12)
 inject_status = tk.Label(tab2, text = 'Not Ready.', bg='light grey')
@@ -894,14 +891,13 @@ while True:
                 print(bytes(server_data))
                 print(lib3270.get_ascii(server_data))
             if hack_on:
-                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
                 write_log('S', 'Hack Field Attributes: ENABLED (' +
                         'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
                         'Show Hidden: ' + str(hack_hf.get()) + " - " +
                         'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" +
                         'SF: ' + str(hack_sf.get()) + " - " +
                         'SFE: ' + str(hack_sfe.get()) + " - " +
-                        'SA: ' + str(hack_sa.get()) + " - " +
                         'MF: ' + str(hack_mf.get()) + " - " +
                         'EI: ' + str(hack_ei.get()) + " - " +
                         'HV: ' + str(hack_hv.get()) +
@@ -915,14 +911,13 @@ while True:
     if hack_toggled:
         if len(server_data) > 0:
             if hack_on:
-                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_sa.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
                 write_log('S', 'Hack Field Attributes: TOGGLED ON (' +
                         'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
                         'Show Hidden: ' + str(hack_hf.get()) + " - " +
                         'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" +
                         'SF: ' + str(hack_sf.get()) + " - " +
                         'SFE: ' + str(hack_sfe.get()) + " - " +
-                        'SA: ' + str(hack_sa.get()) + " - " +
                         'MF: ' + str(hack_mf.get()) + " - " +
                         'EI: ' + str(hack_ei.get()) + " - " +
                         'HV: ' + str(hack_hv.get()) +
