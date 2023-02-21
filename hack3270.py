@@ -41,7 +41,7 @@ from pathlib import Path
 from tkinter import font
 
 NAME = "hack3270"
-VERSION = "1.1.5"
+VERSION = "1.2.0"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
@@ -53,6 +53,7 @@ root_height = 100
 client_data = []
 server_data = []
 hack_on = 0
+hack_color_on = 0
 silence = 0
 offline_mode = 0
 inject_setup_capture = 0
@@ -79,6 +80,7 @@ tab2 = tk.Frame(tabControl, background="light grey")
 tab3 = tk.Frame(tabControl, background="light grey")
 tab4 = tk.Frame(tabControl, background="light grey")
 tab5 = tk.Frame(tabControl, background="light grey")
+tab6 = tk.Frame(tabControl, background="light grey")
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 hack_prot = tk.IntVar(value = 1)
@@ -89,6 +91,10 @@ hack_hf = tk.IntVar(value = 1)
 hack_rnr = tk.IntVar(value = 1)
 hack_ei = tk.IntVar(value = 1)
 hack_hv = tk.IntVar(value = 1)
+hack_color_sfe = tk.IntVar(value = 1)
+hack_color_mf = tk.IntVar(value = 1)
+hack_color_sa = tk.IntVar(value = 1)
+hack_color_hv = tk.IntVar(value = 1)
 aid_no = tk.IntVar(value = 1)
 aid_qreply = tk.IntVar(value = 1)
 aid_enter = tk.IntVar(value = 0)
@@ -132,9 +138,11 @@ inject_trunc = tk.StringVar(value = 'SKIP')
 inject_3270e = True
 EXIT_LOOP = 0
 hack_toggled = 0
+hack_color_toggled = 0
 last_db_id = 0
 db_filename = ''
 message_count = 0
+log_line = ''
 
 def usage():
     print("\nUsage: " + sys.argv[0] + " [OPTIONS]\n")
@@ -181,10 +189,31 @@ def hack_button_pressed():
         hack_toggled = 1
     return
 
+def hack_color_button_pressed():
+    global hack_color_on, hack_color_toggled
+
+    if hack_color_on:
+        hack_color_on = 0
+        hack_color_button["text"] = 'OFF'
+        root.update()
+        hack_color_toggled = 1
+    else:
+        hack_color_on = 1
+        hack_color_button["text"] = 'ON'
+        root.update()
+        hack_color_toggled = 1
+    return
+
 def hack_toggle():
     global hack_toggled
 
     hack_toggled = 1
+    return
+
+def hack_color_toggle():
+    global hack_color_toggled
+
+    hack_color_toggled = 1
     return
 
 def continue_func():
@@ -236,9 +265,10 @@ def inject_go():
 
     # All setup conditions met...
     tabControl.tab(0, state="disabled")
-    tabControl.tab(2, state="disabled")
+    tabControl.tab(1, state="disabled")
     tabControl.tab(3, state="disabled")
     tabControl.tab(4, state="disabled")
+    tabControl.tab(5, state="disabled")
     injections = open(inject_filename, 'r')
     while True:
         injection_line = injections.readline()
@@ -262,9 +292,10 @@ def inject_go():
             send_key('CLEAR', b'\x6d')
     injections.close()
     tabControl.tab(0, state="normal")
-    tabControl.tab(2, state="normal")
+    tabControl.tab(1, state="normal")
     tabControl.tab(3, state="normal")
     tabControl.tab(4, state="normal")
+    tabControl.tab(5, state="normal")
     return
 
 def inject_reset():
@@ -316,6 +347,7 @@ def aid_setdef():
 def tend_server():
     global server, hack_on, hack_prot, hack_hf, hack_rnr, hack_sf, hack_sfe, hack_mf
 
+    log_line = ''
     my_select_timeout = 1
     while True:
         my_rlist, w, e = select.select([server], [], [], my_select_timeout)
@@ -324,21 +356,21 @@ def tend_server():
             server_data = server.recv(BUFFER_MAX)
             if len(server_data) > 0:
                 if hack_on:
-                    hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
+                    log_line = 'Hack Field Attributes: ENABLED (' + 'Remove Field Prot: ' + str(hack_prot.get()) + " - " + 'Show Hidden: ' + str(hack_hf.get()) + " - " + 'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" + 'SF: ' + str(hack_sf.get()) + " - " + 'SFE: ' + str(hack_sfe.get()) + " - " + 'MF: ' + str(hack_mf.get()) + " - " + 'EI: ' + str(hack_ei.get()) + " - " + 'HV: ' + str(hack_hv.get()) + ') '
+                if hack_color_on:
+                    log_line = log_line + 'Hack Text Color: ENABLED (' + 'SFE: ' + str(hack_color_sfe.get()) + " - " + 'MF: ' + str(hack_color_mf.get()) + " - " + 'SF: ' + str(hack_color_sa.get()) + " - " + 'HV: ' + str(hack_color_hv.get()) + ')'
+                if hack_on and hack_color_on:
+                    hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
                     client.send(hacked_server)
-                    write_log('S', 'Hack Field Attributes: ENABLED (' +
-                            'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
-                           'Show Hidden: ' + str(hack_hf.get()) + " - " +
-                          'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" +
-                          'SF: ' + str(hack_sf.get()) + " - " +
-                          'SFE: ' + str(hack_sfe.get()) + " - " +
-                          'MF: ' + str(hack_mf.get()) + " - " +
-                          'EI: ' + str(hack_ei.get()) + " - " +
-                          'HV: ' + str(hack_hv.get()) +
-                          ')', hacked_server)
+                elif hack_on and not hack_color_on:
+                    hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), 0, 0, 0, 0)
+                    client.send(hacked_server)
+                elif not hack_on and hack_color_on:
+                    hacked_server = lib3270.manipulate(server_data, 0, 0, 0, 0, 0, 0, 0, 0, hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
+                    client.send(hacked_server)
                 else:
                     client.send(server_data)
-                    write_log('S', '', server_data)
+                write_log('S', log_line, server_data)
         else:
             break
     return
@@ -363,8 +395,9 @@ def send_keys():
 
     tabControl.tab(0, state="disabled")
     tabControl.tab(1, state="disabled")
-    tabControl.tab(3, state="disabled")
+    tabControl.tab(2, state="disabled")
     tabControl.tab(4, state="disabled")
+    tabControl.tab(5, state="disabled")
     if aid_no.get(): send_key('NO', b'\x60')
     if aid_qreply.get(): send_key('QREPLY', b'\x61')
     if aid_enter.get(): send_key('ENTER', b'\x7d')
@@ -403,8 +436,9 @@ def send_keys():
     send_label["text"] = 'Ready.'
     tabControl.tab(0, state="normal")
     tabControl.tab(1, state="normal")
-    tabControl.tab(3, state="normal")
+    tabControl.tab(2, state="normal")
     tabControl.tab(4, state="normal")
+    tabControl.tab(5, state="normal")
     return
 
 def aid_refresh(server_data):
@@ -702,10 +736,11 @@ else:
 
 # Tabs---
 tabControl.add(tab1, text ='Hack Field Attributes')
-tabControl.add(tab2, text ='Inject Into Fields')
-tabControl.add(tab3, text ='Inject Key Presses')
-tabControl.add(tab4, text ='Logs')
-tabControl.add(tab5, text ='Help')
+tabControl.add(tab2, text ='Hack Text Color')
+tabControl.add(tab3, text ='Inject Into Fields')
+tabControl.add(tab4, text ='Inject Key Presses')
+tabControl.add(tab5, text ='Logs')
+tabControl.add(tab6, text ='Help')
 tabControl.pack(expand = 1, fill ="both")
 # Tab : Hack Field Attributes---
 a1 = tk.Label(tab1, text='Hack Fields:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=10)
@@ -720,66 +755,75 @@ a9 = tk.Checkbutton(tab1, text='Modify Field', bg='light grey', variable=hack_mf
 a10 = tk.Label(tab1, text='Hidden Field Highlighting:', font="TkDefaultFont 12 underline", bg='light grey').place(x=600, y=2)
 a11 = tk.Checkbutton(tab1, text='Enable Intensity', bg='light grey', variable=hack_ei, onvalue=1, offvalue=0, command=hack_toggle).place(x=600, y=25)
 a12 = tk.Checkbutton(tab1, text='High Visibility', bg='light grey', variable=hack_hv, onvalue=1, offvalue=0, command=hack_toggle).place(x=600, y=50)
+# Tab : Hack Text Color
+d1 = tk.Label(tab2, text='Hack Color:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=10)
+hack_color_button = ttk.Button(tab2, text='OFF', width=8, command=hack_color_button_pressed)
+hack_color_button.place(x=20,y=33)
+d2 = tk.Checkbutton(tab2, text='Start Field Extended', bg='light grey', variable=hack_color_sfe, onvalue=1, offvalue=0, command=hack_color_toggle).place(x=150, y=2)
+d3 = tk.Checkbutton(tab2, text='Modify Field', bg='light grey', variable=hack_color_mf, onvalue=1, offvalue=0, command=hack_color_toggle).place(x=150, y=25)
+d4 = tk.Checkbutton(tab2, text='Set Attribute', bg='light grey', variable=hack_color_sa, onvalue=1, offvalue=0, command=hack_color_toggle).place(x=150, y=50)
+d5 = tk.Label(tab2, text='Hidden Color Highlighting:', font="TkDefaultFont 12 underline", bg='light grey').place(x=330, y=2)
+d6 = tk.Checkbutton(tab2, text='High Visibility', bg='light grey', variable=hack_color_hv, onvalue=1, offvalue=0, command=hack_color_toggle).place(x=330, y=25)
 # Tab : Inject Into Fields---
-b0 = tk.Label(tab2, text='Status:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=12)
-inject_status = tk.Label(tab2, text = 'Not Ready.', bg='light grey')
+b0 = tk.Label(tab3, text='Status:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=12)
+inject_status = tk.Label(tab3, text = 'Not Ready.', bg='light grey')
 inject_status.place(x=23, y=40)
-inject_file_button = ttk.Button(tab2, text='FILE', width=8, command=browse_files).place(x=125, y=2)
-inject_setup_button = ttk.Button(tab2, text='SETUP', width=8, command=inject_setup).place(x=200, y=2)
-inject_button = ttk.Button(tab2, text='INJECT', width=8, command=inject_go).place(x=275, y=2)
-inject_reset_button = ttk.Button(tab2, text='RESET', width=8, command=inject_reset).place(x=350, y=2)
-b1 = tk.Label(tab2, text='Mask:', font="TkDefaultFont 12 underline", bg='light grey').place(x=475, y=9)
+inject_file_button = ttk.Button(tab3, text='FILE', width=8, command=browse_files).place(x=125, y=2)
+inject_setup_button = ttk.Button(tab3, text='SETUP', width=8, command=inject_setup).place(x=200, y=2)
+inject_button = ttk.Button(tab3, text='INJECT', width=8, command=inject_go).place(x=275, y=2)
+inject_reset_button = ttk.Button(tab3, text='RESET', width=8, command=inject_reset).place(x=350, y=2)
+b1 = tk.Label(tab3, text='Mask:', font="TkDefaultFont 12 underline", bg='light grey').place(x=475, y=9)
 b2options = ["@", "#", "$", "%", "^", "&", "*"]
-b2 =ttk.OptionMenu(tab2, inject_mask, b2options[6], *b2options).place(x=525, y=8)
-b3 = tk.Label(tab2, text='Mode:', font="TkDefaultFont 12 underline", bg='light grey').place(x=600, y=9)
+b2 =ttk.OptionMenu(tab3, inject_mask, b2options[6], *b2options).place(x=525, y=8)
+b3 = tk.Label(tab3, text='Mode:', font="TkDefaultFont 12 underline", bg='light grey').place(x=600, y=9)
 b4options = ["SKIP", "TRUNC"]
-b4 =ttk.OptionMenu(tab2, inject_trunc, b4options[0], *b4options).place(x=650, y=8)
-b5 = tk.Label(tab2, text='Keys:', font="TkDefaultFont 12 underline", bg='light grey').place(x=750, y=9)
+b4 =ttk.OptionMenu(tab3, inject_trunc, b4options[0], *b4options).place(x=650, y=8)
+b5 = tk.Label(tab3, text='Keys:', font="TkDefaultFont 12 underline", bg='light grey').place(x=750, y=9)
 b6options = ["ENTER", "ENTER+CLEAR", "ENTER+PF3+CLEAR"]
-b6 =ttk.OptionMenu(tab2, inject_key, b6options[0], *b6options).place(x=800, y=8)
+b6 =ttk.OptionMenu(tab3, inject_key, b6options[0], *b6options).place(x=800, y=8)
 # Tab : Inject Key Presses---
-send_button = ttk.Button(tab3, text = 'Send Keys', command=send_keys, width=10).place(x=25, y=12)
-send_label = tk.Label(tab3, text = 'Ready.', bg='light grey')
+send_button = ttk.Button(tab4, text = 'Send Keys', command=send_keys, width=10).place(x=25, y=12)
+send_label = tk.Label(tab4, text = 'Ready.', bg='light grey')
 send_label.place(x=25, y=50)
-c1 = tk.Checkbutton(tab3, text='NO',variable=aid_no, onvalue=1, offvalue=0, bg='light grey').place(x=150, y=0)
-c2 = tk.Checkbutton(tab3, text='QREPLY',variable=aid_qreply, onvalue=1, offvalue=0, bg='light grey').place(x=250, y=0)
-c3 = tk.Checkbutton(tab3, text='ENTER',variable=aid_enter, onvalue=1, offvalue=0, bg='light grey').place(x=350, y=0)
-c4 = tk.Checkbutton(tab3, text='PF1',variable=aid_pf1, onvalue=1, offvalue=0, bg='light grey').place(x=450, y=0)
-c5 = tk.Checkbutton(tab3, text='PF2',variable=aid_pf2, onvalue=1, offvalue=0, bg='light grey').place(x=550, y=0)
-c6 = tk.Checkbutton(tab3, text='PF3',variable=aid_pf3, onvalue=1, offvalue=0, bg='light grey').place(x=650, y=0)
-c7 = tk.Checkbutton(tab3, text='PF4',variable=aid_pf4, onvalue=1, offvalue=0, bg='light grey').place(x=750, y=0)
-c8 = tk.Checkbutton(tab3, text='PF5',variable=aid_pf5, onvalue=1, offvalue=0, bg='light grey').place(x=850, y=0)
-c9 = tk.Checkbutton(tab3, text='PF6',variable=aid_pf6, onvalue=1, offvalue=0, bg='light grey').place(x=950, y=0)
-c10 = tk.Checkbutton(tab3, text='PF7',variable=aid_pf7, onvalue=1, offvalue=0, bg='light grey').place(x=1050, y=0)
-c11 = tk.Checkbutton(tab3, text='PF8',variable=aid_pf8, onvalue=1, offvalue=0, bg='light grey').place(x=1150, y=0)
-c12 = tk.Checkbutton(tab3, text='PF9',variable=aid_pf9, onvalue=1, offvalue=0, bg='light grey').place(x=1250, y=0)
-c13 = tk.Checkbutton(tab3, text='PF10',variable=aid_pf10, onvalue=1, offvalue=0, bg='light grey').place(x=150, y=25)
-c14 = tk.Checkbutton(tab3, text='PF11',variable=aid_pf11, onvalue=1, offvalue=0, bg='light grey').place(x=250, y=25)
-c15 = tk.Checkbutton(tab3, text='PF12',variable=aid_pf12, onvalue=1, offvalue=0, bg='light grey').place(x=350, y=25)
-c16 = tk.Checkbutton(tab3, text='PF13',variable=aid_pf13, onvalue=1, offvalue=0, bg='light grey').place(x=450, y=25)
-c17 = tk.Checkbutton(tab3, text='PF14',variable=aid_pf14, onvalue=1, offvalue=0, bg='light grey').place(x=550, y=25)
-c18 = tk.Checkbutton(tab3, text='PF15',variable=aid_pf15, onvalue=1, offvalue=0, bg='light grey').place(x=650, y=25)
-c19 = tk.Checkbutton(tab3, text='PF16',variable=aid_pf16, onvalue=1, offvalue=0, bg='light grey').place(x=750, y=25)
-c20 = tk.Checkbutton(tab3, text='PF17',variable=aid_pf17, onvalue=1, offvalue=0, bg='light grey').place(x=850, y=25)
-c21 = tk.Checkbutton(tab3, text='PF18',variable=aid_pf18, onvalue=1, offvalue=0, bg='light grey').place(x=950, y=25)
-c22 = tk.Checkbutton(tab3, text='PF19',variable=aid_pf19, onvalue=1, offvalue=0, bg='light grey').place(x=1050, y=25)
-c23 = tk.Checkbutton(tab3, text='PF20',variable=aid_pf20, onvalue=1, offvalue=0, bg='light grey').place(x=1150, y=25)
-c24 = tk.Checkbutton(tab3, text='PF21',variable=aid_pf21, onvalue=1, offvalue=0, bg='light grey').place(x=1250, y=25)
-c25 = tk.Checkbutton(tab3, text='PF22',variable=aid_pf22, onvalue=1, offvalue=0, bg='light grey').place(x=150, y=50)
-c26 = tk.Checkbutton(tab3, text='PF23',variable=aid_pf23, onvalue=1, offvalue=0, bg='light grey').place(x=250, y=50)
-c27 = tk.Checkbutton(tab3, text='PF24',variable=aid_pf24, onvalue=1, offvalue=0, bg='light grey').place(x=350, y=50)
-c28 = tk.Checkbutton(tab3, text='OICR',variable=aid_oicr, onvalue=1, offvalue=0, bg='light grey').place(x=450, y=50)
-c29 = tk.Checkbutton(tab3, text='MSR_MHS',variable=aid_msr_mhs, onvalue=1, offvalue=0, bg='light grey').place(x=550, y=50)
-c30 = tk.Checkbutton(tab3, text='SELECT',variable=aid_select, onvalue=1, offvalue=0, bg='light grey').place(x=650, y=50)
-c31 = tk.Checkbutton(tab3, text='PA1',variable=aid_pa1, onvalue=1, offvalue=0, bg='light grey').place(x=750, y=50)
-c32 = tk.Checkbutton(tab3, text='PA2',variable=aid_pa2, onvalue=1, offvalue=0, bg='light grey').place(x=850, y=50)
-c33 = tk.Checkbutton(tab3, text='PA3',variable=aid_pa3, onvalue=1, offvalue=0, bg='light grey').place(x=950, y=50)
-c34 = tk.Checkbutton(tab3, text='CLEAR',variable=aid_clear, onvalue=1, offvalue=0, bg='light grey').place(x=1050, y=50)
-c35 = tk.Checkbutton(tab3, text='SYSREQ',variable=aid_sysreq, onvalue=1, offvalue=0, bg='light grey').place(x=1150, y=50)
+c1 = tk.Checkbutton(tab4, text='NO',variable=aid_no, onvalue=1, offvalue=0, bg='light grey').place(x=150, y=0)
+c2 = tk.Checkbutton(tab4, text='QREPLY',variable=aid_qreply, onvalue=1, offvalue=0, bg='light grey').place(x=250, y=0)
+c3 = tk.Checkbutton(tab4, text='ENTER',variable=aid_enter, onvalue=1, offvalue=0, bg='light grey').place(x=350, y=0)
+c4 = tk.Checkbutton(tab4, text='PF1',variable=aid_pf1, onvalue=1, offvalue=0, bg='light grey').place(x=450, y=0)
+c5 = tk.Checkbutton(tab4, text='PF2',variable=aid_pf2, onvalue=1, offvalue=0, bg='light grey').place(x=550, y=0)
+c6 = tk.Checkbutton(tab4, text='PF3',variable=aid_pf3, onvalue=1, offvalue=0, bg='light grey').place(x=650, y=0)
+c7 = tk.Checkbutton(tab4, text='PF4',variable=aid_pf4, onvalue=1, offvalue=0, bg='light grey').place(x=750, y=0)
+c8 = tk.Checkbutton(tab4, text='PF5',variable=aid_pf5, onvalue=1, offvalue=0, bg='light grey').place(x=850, y=0)
+c9 = tk.Checkbutton(tab4, text='PF6',variable=aid_pf6, onvalue=1, offvalue=0, bg='light grey').place(x=950, y=0)
+c10 = tk.Checkbutton(tab4, text='PF7',variable=aid_pf7, onvalue=1, offvalue=0, bg='light grey').place(x=1050, y=0)
+c11 = tk.Checkbutton(tab4, text='PF8',variable=aid_pf8, onvalue=1, offvalue=0, bg='light grey').place(x=1150, y=0)
+c12 = tk.Checkbutton(tab4, text='PF9',variable=aid_pf9, onvalue=1, offvalue=0, bg='light grey').place(x=1250, y=0)
+c13 = tk.Checkbutton(tab4, text='PF10',variable=aid_pf10, onvalue=1, offvalue=0, bg='light grey').place(x=150, y=25)
+c14 = tk.Checkbutton(tab4, text='PF11',variable=aid_pf11, onvalue=1, offvalue=0, bg='light grey').place(x=250, y=25)
+c15 = tk.Checkbutton(tab4, text='PF12',variable=aid_pf12, onvalue=1, offvalue=0, bg='light grey').place(x=350, y=25)
+c16 = tk.Checkbutton(tab4, text='PF13',variable=aid_pf13, onvalue=1, offvalue=0, bg='light grey').place(x=450, y=25)
+c17 = tk.Checkbutton(tab4, text='PF14',variable=aid_pf14, onvalue=1, offvalue=0, bg='light grey').place(x=550, y=25)
+c18 = tk.Checkbutton(tab4, text='PF15',variable=aid_pf15, onvalue=1, offvalue=0, bg='light grey').place(x=650, y=25)
+c19 = tk.Checkbutton(tab4, text='PF16',variable=aid_pf16, onvalue=1, offvalue=0, bg='light grey').place(x=750, y=25)
+c20 = tk.Checkbutton(tab4, text='PF17',variable=aid_pf17, onvalue=1, offvalue=0, bg='light grey').place(x=850, y=25)
+c21 = tk.Checkbutton(tab4, text='PF18',variable=aid_pf18, onvalue=1, offvalue=0, bg='light grey').place(x=950, y=25)
+c22 = tk.Checkbutton(tab4, text='PF19',variable=aid_pf19, onvalue=1, offvalue=0, bg='light grey').place(x=1050, y=25)
+c23 = tk.Checkbutton(tab4, text='PF20',variable=aid_pf20, onvalue=1, offvalue=0, bg='light grey').place(x=1150, y=25)
+c24 = tk.Checkbutton(tab4, text='PF21',variable=aid_pf21, onvalue=1, offvalue=0, bg='light grey').place(x=1250, y=25)
+c25 = tk.Checkbutton(tab4, text='PF22',variable=aid_pf22, onvalue=1, offvalue=0, bg='light grey').place(x=150, y=50)
+c26 = tk.Checkbutton(tab4, text='PF23',variable=aid_pf23, onvalue=1, offvalue=0, bg='light grey').place(x=250, y=50)
+c27 = tk.Checkbutton(tab4, text='PF24',variable=aid_pf24, onvalue=1, offvalue=0, bg='light grey').place(x=350, y=50)
+c28 = tk.Checkbutton(tab4, text='OICR',variable=aid_oicr, onvalue=1, offvalue=0, bg='light grey').place(x=450, y=50)
+c29 = tk.Checkbutton(tab4, text='MSR_MHS',variable=aid_msr_mhs, onvalue=1, offvalue=0, bg='light grey').place(x=550, y=50)
+c30 = tk.Checkbutton(tab4, text='SELECT',variable=aid_select, onvalue=1, offvalue=0, bg='light grey').place(x=650, y=50)
+c31 = tk.Checkbutton(tab4, text='PA1',variable=aid_pa1, onvalue=1, offvalue=0, bg='light grey').place(x=750, y=50)
+c32 = tk.Checkbutton(tab4, text='PA2',variable=aid_pa2, onvalue=1, offvalue=0, bg='light grey').place(x=850, y=50)
+c33 = tk.Checkbutton(tab4, text='PA3',variable=aid_pa3, onvalue=1, offvalue=0, bg='light grey').place(x=950, y=50)
+c34 = tk.Checkbutton(tab4, text='CLEAR',variable=aid_clear, onvalue=1, offvalue=0, bg='light grey').place(x=1050, y=50)
+c35 = tk.Checkbutton(tab4, text='SYSREQ',variable=aid_sysreq, onvalue=1, offvalue=0, bg='light grey').place(x=1150, y=50)
 # Tab : Logs---
-treev = ttk.Treeview(tab4, selectmode="browse")
+treev = ttk.Treeview(tab5, selectmode="browse")
 treev.place(x=25, y=10, height=220)
-verscrlbar = ttk.Scrollbar(tab4, orient ="vertical", command = treev.yview)
+verscrlbar = ttk.Scrollbar(tab5, orient ="vertical", command = treev.yview)
 treev.configure(xscrollcommand = verscrlbar.set)
 verscrlbar.place(x=5, y=10, height=220)
 treev["columns"] = ("1", "2", "3", "4", "5")
@@ -800,14 +844,14 @@ for row in records:
     treev.insert('', 'end',text="",values=(row[0], datetime.datetime.fromtimestamp(float(row[1])), expand_CS(row[2]), row[4], row[3]))
     last_db_id = int(row[0])
 treev.bind('<<TreeviewSelect>>', fetch_item)
-d1 = tkk.ScrolledText(master = tab4, wrap = tk.CHAR, height=12)
+d1 = tkk.ScrolledText(master = tab5, wrap = tk.CHAR, height=12)
 if platform.system()=="Darwin":
     d1.place(x=25, y=235, width=screen_width - 105, height=220)
 else:
     d1.place(x=25, y=235, width=screen_width - 60, height=220)
 d1.config(state = "disabled")
 # Tab : Help---
-e1 = tkk.ScrolledText(master = tab5, wrap = tk.WORD, width = 20, height = 20)
+e1 = tkk.ScrolledText(master = tab6, wrap = tk.WORD, width = 20, height = 20)
 e1.insert(tk.INSERT, readme_text)
 e1.pack(padx = 10, pady = 10, fill=tk.BOTH, expand=True)
 e1.config(state = "disabled")
@@ -816,18 +860,19 @@ if offline_mode:
     tabControl.tab(0, state="disabled")
     tabControl.tab(1, state="disabled")
     tabControl.tab(2, state="disabled")
+    tabControl.tab(3, state="disabled")
 
 lastTab = 0
 while True:
     # Tend to tab selection
     tabNum = tabControl.index(tabControl.select())
     if tabNum != lastTab:
-        if tabNum == 2: # Inject Key Presses
+        if tabNum == 3: # Inject Key Presses
             aid_refresh(server_data)
             root.geometry(str(int(screen_width * 0.99))+'x'+str(root_height)+'+0+0')
-        elif tabNum == 3: # Logs
+        elif tabNum == 4: # Logs
             root.geometry(str(int(screen_width * 0.99))+'x485+0+0')
-        elif tabNum == 4: # Help
+        elif tabNum == 5: # Help
             root.geometry(str(int(screen_width * 0.99))+'x485+0+0')
         else:
             root.geometry(str(int(screen_width * 0.99))+'x'+str(root_height)+'+0+0')
@@ -886,48 +931,56 @@ while True:
     if server in rlist:
         server_data = server.recv(BUFFER_MAX)
         if len(server_data) > 0:
+            log_line = ''
             if not silence:
                 print("Server:")
                 print(bytes(server_data))
                 print(lib3270.get_ascii(server_data))
             if hack_on:
-                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
-                write_log('S', 'Hack Field Attributes: ENABLED (' +
-                        'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
-                        'Show Hidden: ' + str(hack_hf.get()) + " - " +
-                        'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" +
-                        'SF: ' + str(hack_sf.get()) + " - " +
-                        'SFE: ' + str(hack_sfe.get()) + " - " +
-                        'MF: ' + str(hack_mf.get()) + " - " +
-                        'EI: ' + str(hack_ei.get()) + " - " +
-                        'HV: ' + str(hack_hv.get()) +
-                        ')', hacked_server)
+                log_line = 'Hack Field Attributes: ENABLED (' + 'Remove Field Prot: ' + str(hack_prot.get()) + " - " + 'Show Hidden: ' + str(hack_hf.get()) + " - " + 'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" + 'SF: ' + str(hack_sf.get()) + " - " + 'SFE: ' + str(hack_sfe.get()) + " - " + 'MF: ' + str(hack_mf.get()) + " - " + 'EI: ' + str(hack_ei.get()) + " - " + 'HV: ' + str(hack_hv.get()) + ') '
+            if hack_color_on:
+                log_line = log_line + 'Hack Text Color: ENABLED (' + 'SFE: ' + str(hack_color_sfe.get()) + " - " + 'MF: ' + str(hack_color_mf.get()) + " - " + 'SF: ' + str(hack_color_sa.get()) + " - " + 'HV: ' + str(hack_color_hv.get()) + ')'
+            if hack_on and hack_color_on:
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
+                client.send(hacked_server)
+            elif hack_on and not hack_color_on:
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), 0, 0, 0, 0)
+                client.send(hacked_server)
+            elif not hack_on and hack_color_on:
+                hacked_server = lib3270.manipulate(server_data, 0, 0, 0, 0, 0, 0, 0, 0, hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
                 client.send(hacked_server)
             else:
-                write_log('S', '', server_data)
                 client.send(server_data)
+            write_log('S', log_line, server_data)
         if tabNum == 2: # Inject Keys
             aid_refresh(server_data)
-    if hack_toggled:
+    if hack_toggled or hack_color_toggled: # Resend data to client if either of these options are toggled.
         if len(server_data) > 0:
-            if hack_on:
-                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get())
-                write_log('S', 'Hack Field Attributes: TOGGLED ON (' +
-                        'Remove Field Prot: ' + str(hack_prot.get()) + " - " +
-                        'Show Hidden: ' + str(hack_hf.get()) + " - " +
-                        'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" +
-                        'SF: ' + str(hack_sf.get()) + " - " +
-                        'SFE: ' + str(hack_sfe.get()) + " - " +
-                        'MF: ' + str(hack_mf.get()) + " - " +
-                        'EI: ' + str(hack_ei.get()) + " - " +
-                        'HV: ' + str(hack_hv.get()) +
-                        ')', hacked_server)
+            log_line = ''
+            if hack_toggled:
+                if hack_on:
+                    log_line = 'Hack Field Attributes: TOGGLED ON (' + 'Remove Field Prot: ' + str(hack_prot.get()) + " - " + 'Show Hidden: ' + str(hack_hf.get()) + " - " + 'Remove NUM Prot: ' + str(hack_rnr.get()) + ") (" + 'SF: ' + str(hack_sf.get()) + " - " + 'SFE: ' + str(hack_sfe.get()) + " - " + 'MF: ' + str(hack_mf.get()) + " - " + 'EI: ' + str(hack_ei.get()) + " - " + 'HV: ' + str(hack_hv.get()) + ') '
+                else:
+                    log_line = 'Hack Fields Attributes: TOGGLED OFF '
+                hack_toggled = 0
+            if hack_color_toggled:
+                if hack_color_on:
+                    log_line = log_line + 'Hack Text Color: TOGGLED ON (' + 'SFE: ' + str(hack_color_sfe.get()) + " - " + 'MF: ' + str(hack_color_mf.get()) + " - " + 'SF: ' + str(hack_color_sa.get()) + " - " + 'HV: ' + str(hack_color_hv.get()) + ')'
+                else:
+                    log_line = 'Hack Text Color: TOGGLED OFF '
+                hack_color_toggled = 0
+            if hack_on and hack_color_on:
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
+                client.send(hacked_server)
+            elif hack_on and not hack_color_on:
+                hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), 0, 0, 0, 0)
+                client.send(hacked_server)
+            elif not hack_on and hack_color_on:
+                hacked_server = lib3270.manipulate(server_data, 0, 0, 0, 0, 0, 0, 0, 0, hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
                 client.send(hacked_server)
             else:
-                write_log('S', 'Hack Fields Attributes: TOGGLED OFF', server_data)
                 client.send(server_data)
-        hack_toggled = 0
-
+            write_log('S', log_line, server_data)
     # Set lastTab to be able to tend to tab selection on next pass
     lastTab = tabNum
     root.update()
