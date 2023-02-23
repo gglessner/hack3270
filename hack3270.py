@@ -44,7 +44,7 @@ NAME = "hack3270"
 VERSION = "1.2.0"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
-SERVER_PORT = 3270
+SERVER_PORT = 0
 PROXY_IP = "127.0.0.1"
 PROXY_PORT = 3271
 TLS_ENABLED = 0
@@ -525,6 +525,20 @@ def parse_telnet(ebcdic_string):
 
 def parse_3270(ebcdic_string, raw_data):
     return_string = re.sub('\\[0x29\\]', '\n[Start Field Extended]', ebcdic_string)
+    return_string = re.sub('\\[0x1D\\]', '\n[Start Field]', return_string)
+    return_string = re.sub('\\[Start Field\\]0', '[Start Field][11110000]', return_string)
+    return_string = re.sub('\\[Start Field\\]1', '[Start Field][11110001]', return_string)
+    return_string = re.sub('\\[Start Field\\]2', '[Start Field][11110010]', return_string)
+    return_string = re.sub('\\[Start Field\\]3', '[Start Field][11110011]', return_string)
+    return_string = re.sub('\\[Start Field\\]4', '[Start Field][11110100]', return_string)
+    return_string = re.sub('\\[Start Field\\]5', '[Start Field][11110101]', return_string)
+    return_string = re.sub('\\[Start Field\\]6', '[Start Field][11110110]', return_string)
+    return_string = re.sub('\\[Start Field\\]7', '[Start Field][11110111]', return_string)
+    return_string = re.sub('\\[Start Field\\]8', '[Start Field][11111000]', return_string)
+    return_string = re.sub('\\[Start Field\\]9', '[Start Field][11111001]', return_string)
+    return_string = re.sub('\\[Start Field\\]A', '[Start Field][11000001]', return_string)
+    return_string = re.sub('\\[Start Field\\]B', '[Start Field][11000010]', return_string)
+    return_string = re.sub('\\[Start Field\\]C', '[Start Field][11000011]', return_string)
     return_string = re.sub('\\[0x28\\]', '[Set Attribute]', return_string)
     return_string = re.sub('{', '[Basic Field Attribute]', return_string)
     return_string = re.sub('\\[0x41\\]\\[0x00\\]', '[Highlighting - Default]', return_string)
@@ -542,7 +556,7 @@ def parse_3270(ebcdic_string, raw_data):
     return_string = re.sub('\\[0x42\\]5', '[Color - Yellow]', return_string)
     return_string = re.sub('\\[0x42\\]6', '[Color - Yellow]', return_string)
     return_string = re.sub('\\[0x42\\]7', '[Color - Neutral/White]', return_string)
-    return_string = re.sub('\\[0x11\\]', '[Move Cursor Position]', return_string)
+    return_string = re.sub('\\[0x11\\]', '\n[Move Cursor Position]', return_string)
     return_string = re.sub('\\[Basic Field Attribute\\] \\[ ', '[Basic Field Attribute][0x40][', return_string)
     return(return_string)
 
@@ -615,11 +629,11 @@ if sql_cur.fetchone()[0] == 1:
     record = sql_cur.fetchall()
     for row in record:
         if SERVER_IP != '' and SERVER_IP != row[1]:
-            print("\nError! -i setting doesn't match server IP address in existig project file!")
+            print("\nError! -i setting doesn't match server IP address in existing project file!")
             sys.exit(2)
         SERVER_IP = row[1];
         if SERVER_PORT != 0 and SERVER_PORT != int(row[2]):
-            print("\nError! -p setting doesn't match server TCP port in existig project file!")
+            print("\nError! -p setting doesn't match server TCP port in existing project file!")
             sys.exit(2)
         SERVER_PORT = int(row[2])
         PROXY_PORT = int(row[3])
@@ -705,7 +719,7 @@ def check_record(record_id):
     records = sql_cur.fetchall()
     for row in records:
         # If the first character is 0xFF then this is a telnet handshake message
-        if row[5][0] == 255:
+        if row[5][0] != 0:
             return True
         else:
             return False
@@ -972,15 +986,18 @@ while True:
             if hack_on and hack_color_on:
                 hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
                 client.send(hacked_server)
+                write_log('S', log_line, hacked_server)
             elif hack_on and not hack_color_on:
                 hacked_server = lib3270.manipulate(server_data, hack_sf.get(), hack_sfe.get(), hack_mf.get(), hack_prot.get(), hack_hf.get(), hack_rnr.get(), hack_ei.get(), hack_hv.get(), 0, 0, 0, 0)
                 client.send(hacked_server)
+                write_log('S', log_line, hacked_server)
             elif not hack_on and hack_color_on:
                 hacked_server = lib3270.manipulate(server_data, 0, 0, 0, 0, 0, 0, 0, 0, hack_color_sfe.get(), hack_color_mf.get(), hack_color_sa.get(), hack_color_hv.get())
                 client.send(hacked_server)
+                write_log('S', log_line, hacked_server)
             else:
                 client.send(server_data)
-            write_log('S', log_line, server_data)
+                write_log('S', log_line, server_data)
     # Set lastTab to be able to tend to tab selection on next pass
     lastTab = tabNum
     root.update()

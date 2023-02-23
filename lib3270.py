@@ -103,7 +103,8 @@ def flip_bits(passed_value, hack_prot, hack_hf, hack_rnr, hack_ei):
     return(value)
 
 def check_hidden(passed_value):
-    if passed_value & 0b00001100 == 0b00001100:
+    #if passed_value & 0b00001100 == 0b00001100:
+    if passed_value & 12 == 12:
         return True
     else:
         return False
@@ -111,20 +112,31 @@ def check_hidden(passed_value):
 def manipulate(passed_data, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack_rnr, hack_ei, hack_hv, hack_color_sfe, hack_color_mf, hack_color_sa, hack_color_hv):
     found_hidden_data = 0
 
+    # Don't manipulate data if telnet
     if passed_data[0] == 255:
         return(passed_data)
+
     data = bytearray(len(passed_data))
     data[:] = passed_data
+
+    # Process hacking of Basic Field Attributes
     for x in range(len(data)):
         if hack_sf and data[x] == 0x1d: # Start Field
-            if check_hidden(data[x + 1]) and hack_hv:
-                found_hidden_data = 1
+            my_position = x
+            found_hidden_data = check_hidden(data[x + 1])
             data[x + 1] = flip_bits(data[x + 1], hack_prot, hack_hf, hack_rnr, hack_ei)
-            if found_hidden_data:
-                data2 = bytearray(len(data) + 6)
-                data2 = data[:x + 2] + b'\x28\x41\xf2\x28\x42\xf6' + data[x + 2:]
-                data = data2
-                x = x + 6
+            if hack_hf and found_hidden_data:
+                bfa_byte = data[x + 1].to_bytes(1, byteorder='little')
+                if hack_hv:
+                    data2 = bytearray(len(data) + 6)
+                    data2 = data[:x] + b'\x29\x03\xc0' + bfa_byte + b'\x41\xf2\x42\xf6' + data[x + 2:]
+                    data = data2
+                    x = x + 6
+                else:
+                    data2 = bytearray(len(data) + 4)
+                    data2 = data[:x + 2] + b'\x28\x42\xf6' + data[x + 2:]
+                    data2 = data[:x] + b'\x29\x02\xc0' + bfa_byte + b'\x42\xf6' + data[x + 2:]
+                    x = x + 4
                 found_hidden_data = 0
         elif data[x] == 0x29: # Start Field Extended
             for y in range(data[x + 1]):
@@ -134,7 +146,38 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack
                     if check_hidden(data[((x + 3) + (y * 2))]) and hack_hv:
                         found_hidden_data = 1
                     data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr, hack_ei)
-                elif hack_color_sfe and data[((x + 3) + (y * 2)) - 1] == 0x42: # Color
+            if hack_sfe and found_hidden_data:
+                data[x + 1] = data[x + 1] + 2
+                data2 = bytearray(len(data) + 4)
+                data2 = data[:x + (data[x + 1] * 2) - 2] + b'\x41\xf2\x42\xf6' + data[x + (data[x + 1] * 2) - 2:]
+                data = data2
+                x = x + 4
+                found_hidden_data = 0
+            continue
+        elif data[x] == 0x2c: # Modify Field
+            for y in range(data[x + 1]):
+                if(len(data) < ((x + 3) + (y * 2))):
+                    continue
+                if hack_mf and data[((x + 3) + (y * 2)) - 1] == 0xc0: # Basic 3270 field attributes
+                    if check_hidden(data[((x + 3) + (y * 2))]) and hack_hv:
+                        found_hidden_data = 1
+                    data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr, hack_ei)
+            if hack_mf and found_hidden_data:
+                data[x + 1] = data[x + 1] + 2
+                data2 = bytearray(len(data) + 4)
+                data2 = data[:x + (data[x + 1] * 2) - 2] + b'\x41\xf2\x42\xf6' + data[x + (data[x + 1] * 2) - 2:]
+                data = data2
+                x = x + 4
+                found_hidden_data = 0
+            continue
+
+    # Process hacking of Colors
+    for x in range(len(data)):
+        if data[x] == 0x29: # Start Field Extended
+            for y in range(data[x + 1]):
+                if(len(data) < ((x + 3) + (y * 2))):
+                    continue
+                if hack_color_sfe and data[((x + 3) + (y * 2)) - 1] == 0x42: # Color
                     if data[((x + 3) + (y * 2))] == 0xf8: # Black
                         if hack_color_hv:
                             data[x + 1] = data[x + 1] + 2
@@ -147,14 +190,6 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack
                             data2 = data[:((x + 3) + (y * 2)) + 1] + b'\x42\xf6' + data[((x + 3) + (y * 2)) + 1:]
                             x = x + 2
                         data = data2
-            if hack_sfe and found_hidden_data:
-                data[x + 1] = data[x + 1] + 2
-                data2 = bytearray(len(data) + 4)
-                data2 = data[:x + (data[x + 1] * 2) - 2] + b'\x41\xf2\x42\xf6' + data[x + (data[x + 1] * 2) - 2:]
-                data = data2
-                x = x + 4
-                found_hidden_data = 0
-            continue
         elif data[x] == 0x28: # Set Attribute
             if hack_color_sa and data[x + 1] == 0x42: # Color
                 if data[x + 2] == 0xf8: # Black
@@ -172,11 +207,7 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack
             for y in range(data[x + 1]):
                 if(len(data) < ((x + 3) + (y * 2))):
                     continue
-                if hack_mf and data[((x + 3) + (y * 2)) - 1] == 0xc0: # Basic 3270 field attributes
-                    if check_hidden(data[((x + 3) + (y * 2))]) and hack_hv:
-                        found_hidden_data = 1
-                    data[((x + 3) + (y * 2))] = flip_bits(data[((x + 3) + (y * 2))], hack_prot, hack_hf, hack_rnr, hack_ei)
-                elif hack_color_mf and data[((x + 3) + (y * 2)) - 1] == 0x42: # Color
+                if hack_color_mf and data[((x + 3) + (y * 2)) - 1] == 0x42: # Color
                     if data[((x + 3) + (y * 2))] == 0xf8: # Black
                         if hack_color_hv:
                             data[x + 1] = data[x + 1] + 2
@@ -189,12 +220,6 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack
                             data2 = data[:((x + 3) + (y * 2)) + 1] + b'\x42\xf6' + data[((x + 3) + (y * 2)) + 1:]
                             x = x + 2
                         data = data2
-            if hack_mf and found_hidden_data:
-                data[x + 1] = data[x + 1] + 2
-                data2 = bytearray(len(data) + 4)
-                data2 = data[:x + (data[x + 1] * 2) - 2] + b'\x41\xf2\x42\xf6' + data[x + (data[x + 1] * 2) - 2:]
-                data = data2
-                x = x + 4
-                found_hidden_data = 0
             continue
+
     return(data)
