@@ -18,6 +18,7 @@ import tkinter as tk
 import socket
 import ssl
 import select
+import re
 
 # EBCDIC to ASCII conversion table
 table = [
@@ -223,3 +224,68 @@ def manipulate(passed_data, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack
             continue
 
     return(data)
+
+def parse_telnet(ebcdic_string):
+    return_string = re.sub('\\[0xFF\\]', '[IAC]', ebcdic_string)
+    return_string = re.sub('\\[0xFE\\]', '[DON\'T]', return_string)
+    return_string = re.sub('\\[0xFD\\]', '[DO]', return_string)
+    return_string = re.sub('\\[0xFC\\]', '[WON\'T]', return_string)
+    return_string = re.sub('\\[0xFB\\]', '[WILL]', return_string)
+    return_string = re.sub('\\[0xFA\\]', '[SB]', return_string)
+    return_string = re.sub('\\[0x29\\]', '[3270-REGIME]', return_string)
+    return_string = re.sub('\\[0x18\\]', '[TERMINAL-TYPE]', return_string)
+    return_string = re.sub('\\[0x19\\]', '[END-OF-RECORD]', return_string)
+    return_string = re.sub('\\[0x28\\]', '[TN3270E]', return_string)
+    return_string = re.sub('\\[0x01\\]', '[SEND]', return_string)
+    return_string = re.sub('\\[DO\\]\\[0x00\\]', '[DO][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[DON\'T\\]\\[0x00\\]', '[DON\'T][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[WILL\\]\\[0x00\\]', '[WILL][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[WON\'T\\]\\[0x00\\]', '[WON\'T][TRANSMIT-BINARY]', return_string)
+    return_string = re.sub('\\[0x00\\]', '[IS]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x32\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-2-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x33\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-3-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x34\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-4-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x35\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-5-E]', return_string)
+    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x44\\]\\[0x59\\]\\[0x4E\\]\\[0x41\\]\\[0x4D\\]\\[0x49\\]\\[0x43\\]', '[IBM-3270-DYNAMIC]', return_string)
+    return_string = re.sub('\\[TN3270E\\]\\[0x08\\]\\[0x02\\]', '[TN3270E][SEND][DEVICE-TYPE]', return_string)
+    return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x07\\]', '[TN3270E][DEVICE-TYPE][REQUEST]', return_string)
+    return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x04\\]', '[TN3270E][DEVICE-TYPE][IS]', return_string)
+    return_string = re.sub('\\]0$', '][SE]', return_string)
+    return(return_string)
+
+def parse_3270(ebcdic_string, raw_data):
+    return_string = re.sub('\\[0x29\\]', '\n[Start Field Extended]', ebcdic_string)
+    return_string = re.sub('\\[0x1D\\]', '\n[Start Field]', return_string)
+    return_string = re.sub('\\[Start Field\\]0', '[Start Field][11110000]', return_string)
+    return_string = re.sub('\\[Start Field\\]1', '[Start Field][11110001]', return_string)
+    return_string = re.sub('\\[Start Field\\]2', '[Start Field][11110010]', return_string)
+    return_string = re.sub('\\[Start Field\\]3', '[Start Field][11110011]', return_string)
+    return_string = re.sub('\\[Start Field\\]4', '[Start Field][11110100]', return_string)
+    return_string = re.sub('\\[Start Field\\]5', '[Start Field][11110101]', return_string)
+    return_string = re.sub('\\[Start Field\\]6', '[Start Field][11110110]', return_string)
+    return_string = re.sub('\\[Start Field\\]7', '[Start Field][11110111]', return_string)
+    return_string = re.sub('\\[Start Field\\]8', '[Start Field][11111000]', return_string)
+    return_string = re.sub('\\[Start Field\\]9', '[Start Field][11111001]', return_string)
+    return_string = re.sub('\\[Start Field\\]A', '[Start Field][11000001]', return_string)
+    return_string = re.sub('\\[Start Field\\]B', '[Start Field][11000010]', return_string)
+    return_string = re.sub('\\[Start Field\\]C', '[Start Field][11000011]', return_string)
+    return_string = re.sub('\\[0x28\\]', '[Set Attribute]', return_string)
+    return_string = re.sub('{', '[Basic Field Attribute]', return_string)
+    return_string = re.sub('\\[0x41\\]\\[0x00\\]', '[Highlighting - Default]', return_string)
+    return_string = re.sub('\\[0x41\\]0', '[Highlighting - Normal]', return_string)
+    return_string = re.sub('\\[0x41\\]1', '[Highlighting - Blink]', return_string)
+    return_string = re.sub('\\[0x41\\]2', '[Highlighting - Reverse]', return_string)
+    return_string = re.sub('\\[0x41\\]4', '[Highlighting - Underscore]', return_string)
+    return_string = re.sub('\\[0x41\\]8', '[Highlighting - Intensity]', return_string)
+    return_string = re.sub('\\[0x42\\]\\[0x00\\]', '[Color - Default]', return_string)
+    return_string = re.sub('\\[0x42\\]0', '[Color - Neutral/Black]', return_string)
+    return_string = re.sub('\\[0x42\\]1', '[Color - Blue]', return_string)
+    return_string = re.sub('\\[0x42\\]2', '[Color - Red]', return_string)
+    return_string = re.sub('\\[0x42\\]3', '[Color - Pink]', return_string)
+    return_string = re.sub('\\[0x42\\]4', '[Color - Green]', return_string)
+    return_string = re.sub('\\[0x42\\]5', '[Color - Yellow]', return_string)
+    return_string = re.sub('\\[0x42\\]6', '[Color - Yellow]', return_string)
+    return_string = re.sub('\\[0x42\\]7', '[Color - Neutral/White]', return_string)
+    return_string = re.sub('\\[0x11\\]', '\n[Move Cursor Position]', return_string)
+    return_string = re.sub('\\[Basic Field Attribute\\] \\[ ', '[Basic Field Attribute][0x40][', return_string)
+    return(return_string)

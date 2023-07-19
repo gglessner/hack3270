@@ -20,6 +20,7 @@
 #  Jay Smith - email: CadmusOfThebes@protonmail.com
 #  Chance Warren
 #  Phil Young - email: mainframed767@gmail.com
+#  J.J. Loden
 # ---------------------
 
 import sys
@@ -37,14 +38,15 @@ import datetime
 import signal
 import platform
 import re
+import csv
 from pathlib import Path
 from tkinter import font
 
 NAME = "hack3270"
-VERSION = "1.2.0"
+VERSION = "1.2.2"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
-SERVER_PORT = 0
+SERVER_PORT = 3270
 PROXY_IP = "127.0.0.1"
 PROXY_PORT = 3271
 TLS_ENABLED = 0
@@ -81,6 +83,7 @@ tab3 = tk.Frame(tabControl, background="light grey")
 tab4 = tk.Frame(tabControl, background="light grey")
 tab5 = tk.Frame(tabControl, background="light grey")
 tab6 = tk.Frame(tabControl, background="light grey")
+tab7 = tk.Frame(tabControl, background="light grey")
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 hack_prot = tk.IntVar(value = 1)
@@ -152,23 +155,30 @@ def usage():
     print("\t-t, --tls\t\tEnable TLS encryption for server connection")
     print("\t-l, --local\t\tLocal tn3270 proxy port [Default: 3271]")
     print("\t-o, --offline\t\tOffline log analysis mode")
-    print("\t-h, --help\t\tThis help message")
+    print("\t-h, --help\t\tThis help message\n")
     return
 
 def on_closing():
     global tabControl, root, sql_con, client, server
 
-    tabControl.tab(0, state="disabled")
-    tabControl.tab(1, state="disabled")
-    tabControl.tab(3, state="disabled")
-    tabControl.tab(4, state="disabled")
-    tabControl.tab(4, state="disabled")
-    root.destroy()
-    sql_con.commit()
-    sql_con.close()
-    client.close()
-    server.close()
-    print("\nClosing log database.\nExited.")
+    root.protocol("WM_DELETE_WINDOW")
+    if 'sql_con' in globals():
+        sql_con.commit()
+        sql_con.close()
+        print("\nClosing log database.")
+    if 'client' in globals():
+        client.close()
+    if 'server' in globals():
+        server.close()
+    if 'tabControl.tab' in globals():
+        tabControl.tab(0, state="disabled")
+        tabControl.tab(1, state="disabled")
+        tabControl.tab(3, state="disabled")
+        tabControl.tab(4, state="disabled")
+        tabControl.tab(4, state="disabled")
+    if 'root' in globals():
+        root.destroy()
+    print("Exiting.\n")
     sys.exit(0)
 
 def sigint_handler(signum, frame):
@@ -221,7 +231,7 @@ def continue_func():
 
     frame.destroy()
     root.update()
-    root.geometry(str(int(screen_width * 0.99))+'x'+str(root_height)+'+0+0')
+    root.geometry(str(int(screen_width))+'x'+str(root_height)+'+0+0')
     EXIT_LOOP = 1
     return
 
@@ -375,12 +385,74 @@ def tend_server():
             break
     return
 
+def export_csv():
+    global export_label
+    csv_filename = db_filename[:-3] + ".csv"
+    export_label["text"] = 'Starting export.'
+    root.update()
+    with sqlite3.connect(db_filename) as db:
+        cursor = db.cursor()
+        rows = cursor.execute("SELECT * FROM Logs")
+        with open(csv_filename, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for row in rows:
+                ebcdic_data = lib3270.get_ascii(row[5])
+                if re.search("^tn3270 ", row[3]):
+                    parsed_3270 = lib3270.parse_telnet(ebcdic_data)
+                else:
+                    parsed_3270 = lib3270.parse_3270(ebcdic_data, row[5])
+                data = parsed_3270.replace('\n', '')
+                timestamp = float(row[1])
+                dt = datetime.datetime.fromtimestamp(timestamp)
+                if row[2] == "C":
+                    direction = "Client"
+                else:
+                    direction = "Server"
+                writer.writerow([dt, direction, row[3], row[4], data.encode('utf-8')])
+        export_label["text"] = 'Export finished, filename is: ' + csv_filename
+        root.update()
+    return
+
+def get_elapsed_time(elapsed):
+    if elapsed < 60:
+        seconds = int(elapsed)
+        return f"{seconds} seconds"
+    elif elapsed < 3600:
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        return f"{minutes} minutes and {seconds} seconds"
+    elif elapsed < 86400:
+        hours = int(elapsed // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = int(elapsed % 60)
+        return f"{hours} hours, {minutes} minutes and {seconds} seconds"
+    else:
+        days = int(elapsed // 86400)
+        hours = int((elapsed % 86400) // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = int(elapsed % 60)
+        return f"{days} days, {hours} hours, {minutes} minutes and {seconds} seconds"
+
+def sort_column(tree, col, reverse):
+    data = [(tree.set(child, col), child) for child in tree.get_children('')]
+    data.sort(reverse=reverse)
+    for i, (_, child) in enumerate(data):
+        tree.move(child, '', i)
+    tree.heading(col, command=lambda:sort_column(tree, col, not reverse))
+
+def sort_numeric_column(tree, col, reverse):
+    data = [(float(tree.set(child, col)), child) for child in tree.get_children('')]
+    data.sort(reverse=reverse)
+    for i, (_, child) in enumerate(data):
+        tree.move(child, '', i)
+    tree.heading(col, command=lambda:sort_numeric_column(tree, col, not reverse))
+
 def send_key(send_text, byte_code):
     global server, send_label, inject_3270e
 
     send_label["text"] = 'Send: ' + send_text
     root.update()
-    write_log('C', 'Sending: ' + send_text, byte_code + b'\xff\xef')
+    write_log('C', 'Sending key: ' + send_text, byte_code + b'\xff\xef')
     if inject_3270e == True:
         print("Sending as 3270E: " + send_text)
         server.send(b'\x00\x00\x00\x00\x01' + byte_code + b'\xff\xef')
@@ -495,71 +567,6 @@ def expand_CS(text):
     elif text == "S":
         return("Server")
 
-def parse_telnet(ebcdic_string):
-    return_string = re.sub('\\[0xFF\\]', '[IAC]', ebcdic_string)
-    return_string = re.sub('\\[0xFE\\]', '[DON\'T]', return_string)
-    return_string = re.sub('\\[0xFD\\]', '[DO]', return_string)
-    return_string = re.sub('\\[0xFC\\]', '[WON\'T]', return_string)
-    return_string = re.sub('\\[0xFB\\]', '[WILL]', return_string)
-    return_string = re.sub('\\[0xFA\\]', '[SB]', return_string)
-    return_string = re.sub('\\[0x29\\]', '[3270-REGIME]', return_string)
-    return_string = re.sub('\\[0x18\\]', '[TERMINAL-TYPE]', return_string)
-    return_string = re.sub('\\[0x19\\]', '[END-OF-RECORD]', return_string)
-    return_string = re.sub('\\[0x28\\]', '[TN3270E]', return_string)
-    return_string = re.sub('\\[0x01\\]', '[SEND]', return_string)
-    return_string = re.sub('\\[DO\\]\\[0x00\\]', '[DO][TRANSMIT-BINARY]', return_string)
-    return_string = re.sub('\\[DON\'T\\]\\[0x00\\]', '[DON\'T][TRANSMIT-BINARY]', return_string)
-    return_string = re.sub('\\[WILL\\]\\[0x00\\]', '[WILL][TRANSMIT-BINARY]', return_string)
-    return_string = re.sub('\\[WON\'T\\]\\[0x00\\]', '[WON\'T][TRANSMIT-BINARY]', return_string)
-    return_string = re.sub('\\[0x00\\]', '[IS]', return_string)
-    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x32\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-2-E]', return_string)
-    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x33\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-3-E]', return_string)
-    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x34\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-4-E]', return_string)
-    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x35\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-5-E]', return_string)
-    return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x44\\]\\[0x59\\]\\[0x4E\\]\\[0x41\\]\\[0x4D\\]\\[0x49\\]\\[0x43\\]', '[IBM-3270-DYNAMIC]', return_string)
-    return_string = re.sub('\\[TN3270E\\]\\[0x08\\]\\[0x02\\]', '[TN3270E][SEND][DEVICE-TYPE]', return_string)
-    return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x07\\]', '[TN3270E][DEVICE-TYPE][REQUEST]', return_string)
-    return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x04\\]', '[TN3270E][DEVICE-TYPE][IS]', return_string)
-    return_string = re.sub('\\]0$', '][SE]', return_string)
-    return(return_string)
-
-def parse_3270(ebcdic_string, raw_data):
-    return_string = re.sub('\\[0x29\\]', '\n[Start Field Extended]', ebcdic_string)
-    return_string = re.sub('\\[0x1D\\]', '\n[Start Field]', return_string)
-    return_string = re.sub('\\[Start Field\\]0', '[Start Field][11110000]', return_string)
-    return_string = re.sub('\\[Start Field\\]1', '[Start Field][11110001]', return_string)
-    return_string = re.sub('\\[Start Field\\]2', '[Start Field][11110010]', return_string)
-    return_string = re.sub('\\[Start Field\\]3', '[Start Field][11110011]', return_string)
-    return_string = re.sub('\\[Start Field\\]4', '[Start Field][11110100]', return_string)
-    return_string = re.sub('\\[Start Field\\]5', '[Start Field][11110101]', return_string)
-    return_string = re.sub('\\[Start Field\\]6', '[Start Field][11110110]', return_string)
-    return_string = re.sub('\\[Start Field\\]7', '[Start Field][11110111]', return_string)
-    return_string = re.sub('\\[Start Field\\]8', '[Start Field][11111000]', return_string)
-    return_string = re.sub('\\[Start Field\\]9', '[Start Field][11111001]', return_string)
-    return_string = re.sub('\\[Start Field\\]A', '[Start Field][11000001]', return_string)
-    return_string = re.sub('\\[Start Field\\]B', '[Start Field][11000010]', return_string)
-    return_string = re.sub('\\[Start Field\\]C', '[Start Field][11000011]', return_string)
-    return_string = re.sub('\\[0x28\\]', '[Set Attribute]', return_string)
-    return_string = re.sub('{', '[Basic Field Attribute]', return_string)
-    return_string = re.sub('\\[0x41\\]\\[0x00\\]', '[Highlighting - Default]', return_string)
-    return_string = re.sub('\\[0x41\\]0', '[Highlighting - Normal]', return_string)
-    return_string = re.sub('\\[0x41\\]1', '[Highlighting - Blink]', return_string)
-    return_string = re.sub('\\[0x41\\]2', '[Highlighting - Reverse]', return_string)
-    return_string = re.sub('\\[0x41\\]4', '[Highlighting - Underscore]', return_string)
-    return_string = re.sub('\\[0x41\\]8', '[Highlighting - Intensity]', return_string)
-    return_string = re.sub('\\[0x42\\]\\[0x00\\]', '[Color - Default]', return_string)
-    return_string = re.sub('\\[0x42\\]0', '[Color - Neutral/Black]', return_string)
-    return_string = re.sub('\\[0x42\\]1', '[Color - Blue]', return_string)
-    return_string = re.sub('\\[0x42\\]2', '[Color - Red]', return_string)
-    return_string = re.sub('\\[0x42\\]3', '[Color - Pink]', return_string)
-    return_string = re.sub('\\[0x42\\]4', '[Color - Green]', return_string)
-    return_string = re.sub('\\[0x42\\]5', '[Color - Yellow]', return_string)
-    return_string = re.sub('\\[0x42\\]6', '[Color - Yellow]', return_string)
-    return_string = re.sub('\\[0x42\\]7', '[Color - Neutral/White]', return_string)
-    return_string = re.sub('\\[0x11\\]', '\n[Move Cursor Position]', return_string)
-    return_string = re.sub('\\[Basic Field Attribute\\] \\[ ', '[Basic Field Attribute][0x40][', return_string)
-    return(return_string)
-
 def fetch_item(a):
     global sql_cur, treev, d1, client
 
@@ -576,9 +583,9 @@ def fetch_item(a):
         d1.config(state='normal')
         d1.delete('1.0', tk.END)
         if re.search("^tn3270 ", row[3]):
-            parsed_3270 = parse_telnet(ebcdic_data)
+            parsed_3270 = lib3270.parse_telnet(ebcdic_data)
         else:
-            parsed_3270 = parse_3270(ebcdic_data, row[5])
+            parsed_3270 = lib3270.parse_3270(ebcdic_data, row[5])
         d1.insert(tk.INSERT, parsed_3270)
         d1.config(state='disabled')
         root.update()
@@ -628,11 +635,13 @@ if sql_cur.fetchone()[0] == 1:
     sql_cur.execute("SELECT * FROM Config")
     record = sql_cur.fetchall()
     for row in record:
-        if SERVER_IP != '' and SERVER_IP != row[1]:
+        if SERVER_IP != '' and SERVER_IP != row[1] and offline_mode == 0:
+            print("Server IP: ", SERVER_IP, "Stored Value: ", row[1])
             print("\nError! -i setting doesn't match server IP address in existing project file!")
             sys.exit(2)
         SERVER_IP = row[1];
-        if SERVER_PORT != 0 and SERVER_PORT != int(row[2]):
+        if SERVER_PORT != 0 and SERVER_PORT != int(row[2]) and offline_mode == 0:
+            print("Server Port: ", SERVER_PORT, "Stored Value: ", row[2])
             print("\nError! -p setting doesn't match server TCP port in existing project file!")
             sys.exit(2)
         SERVER_PORT = int(row[2])
@@ -648,7 +657,7 @@ if sql_cur.fetchone()[0] != 1:
     # Create table for logging---
     sql_cur.execute('CREATE TABLE Logs (ID INTEGER PRIMARY KEY AUTOINCREMENT, TIMESTAMP TEXT, C_S CHAR(1), NOTES TEXT, DATA_LEN INT, RAW_DATA BLOB(4000))') # 3,564
     
-if not SERVER_IP:
+if not SERVER_IP and not offline_mode:
     usage()
     sys.exit(2)
 
@@ -668,11 +677,13 @@ if platform.system()=="Darwin":
 else:
     root.geometry(str(int(screen_width / 2))+'x100+'+str(int((screen_width / 4)))+'+0')
 
+if offline_mode == 1:
+    PROXY_PORT = 3270
 client = lib3270.client_connect(frame, PROXY_IP, PROXY_PORT)
 if not offline_mode:
     server = lib3270.server_connect(frame, SERVER_IP, SERVER_PORT, TLS_ENABLED)
 else:
-    status = tk.Label(frame, text="Offline log analysis mode!", bg='light grey').pack()
+    status = tk.Label(frame, text="OFFLINE LOG ANALYSIS MODE", bg='light grey').pack()
 
 B = tk.Button(frame, text ="Click to Continue", command = continue_func)
 B.pack()
@@ -719,7 +730,7 @@ def check_record(record_id):
     records = sql_cur.fetchall()
     for row in records:
         # If the first character is 0xFF then this is a telnet handshake message
-        if row[5][0] != 0:
+        if row[5][0] == 255:
             return True
         else:
             return False
@@ -745,6 +756,11 @@ if offline_mode:
             client.recv(BUFFER_MAX)
         my_record_num = my_record_num + 1
     print("Telnet negotiation complete.")
+    print("Displaying splash screen.")
+    while check_server(my_record_num) == True:
+        print("Playing server message: " + str(my_record_num))
+        play_record(my_record_num)
+        my_record_num = my_record_num + 1
 else:
     inject_3270e = check_inject_3270e()
 
@@ -754,7 +770,8 @@ tabControl.add(tab2, text ='Hack Text Color')
 tabControl.add(tab3, text ='Inject Into Fields')
 tabControl.add(tab4, text ='Inject Key Presses')
 tabControl.add(tab5, text ='Logs')
-tabControl.add(tab6, text ='Help')
+tabControl.add(tab6, text ='Statistics')
+tabControl.add(tab7, text ='Help')
 tabControl.pack(expand = 1, fill ="both")
 # Tab : Hack Field Attributes---
 a1 = tk.Label(tab1, text='Hack Fields:', font="TkDefaultFont 12 underline", bg='light grey').place(x=22, y=10)
@@ -836,22 +853,22 @@ c34 = tk.Checkbutton(tab4, text='CLEAR',variable=aid_clear, onvalue=1, offvalue=
 c35 = tk.Checkbutton(tab4, text='SYSREQ',variable=aid_sysreq, onvalue=1, offvalue=0, bg='light grey').place(x=1150, y=50)
 # Tab : Logs---
 treev = ttk.Treeview(tab5, selectmode="browse")
-treev.place(x=25, y=10, height=220)
+treev.place(x=25, y=10, height=220, relwidth=0.985)
 verscrlbar = ttk.Scrollbar(tab5, orient ="vertical", command = treev.yview)
-treev.configure(xscrollcommand = verscrlbar.set)
+treev.configure(yscrollcommand = verscrlbar.set)
 verscrlbar.place(x=5, y=10, height=220)
 treev["columns"] = ("1", "2", "3", "4", "5")
 treev['show'] = 'headings'
 treev.column("1", width = int(screen_width * 0.05), anchor ='center')
 treev.column("2", width = int(screen_width * 0.15), anchor ='center')
 treev.column("3", width = int(screen_width * 0.05), anchor ='center')
-treev.column("4", width = int(screen_width * 0.05), anchor ='se')
+treev.column("4", width = int(screen_width * 0.05), anchor ='center')
 treev.column("5", width = int(screen_width * 0.66), anchor ='sw')
-treev.heading("1", text ="ID")
-treev.heading("2", text ="Timestamp")
-treev.heading("3", text ="Sender")
-treev.heading("4", text ="Length")
-treev.heading("5", text ="Notes")
+treev.heading("1", text ="ID", command=lambda:sort_numeric_column(treev, "1", False))
+treev.heading("2", text ="Timestamp", command=lambda:sort_column(treev, "2", False))
+treev.heading("3", text ="Sender", command=lambda:sort_column(treev, "3", False))
+treev.heading("4", text ="Length", command=lambda:sort_numeric_column(treev, "4", False))
+treev.heading("5", text ="Notes", command=lambda:sort_column(treev, "5", False))
 sql_cur.execute("SELECT * FROM Logs")
 records = sql_cur.fetchall()
 for row in records:
@@ -860,12 +877,80 @@ for row in records:
 treev.bind('<<TreeviewSelect>>', fetch_item)
 d1 = tkk.ScrolledText(master = tab5, wrap = tk.CHAR, height=12)
 if platform.system()=="Darwin":
-    d1.place(x=25, y=235, width=screen_width - 105, height=220)
+#    d1.place(x=25, y=235, width=screen_width - 105, height=220)
+    d1.place(x=25, y=235, relwidth=0.985, height=220)
 else:
     d1.place(x=25, y=235, width=screen_width - 60, height=220)
 d1.config(state = "disabled")
+export_button = ttk.Button(tab5, text = 'Export to CSV', command=export_csv, width=10).place(x=25, y=465)
+export_label = tk.Label(tab5, text = 'Ready.', font="TkDefaultFont 12", bg='light grey')
+export_label.place(x=130, y=465)
+# Tab : Statistics---
+ip_label = tk.Label(tab6, text = 'Server IP Address: ' + SERVER_IP, font="TkDefaultFont 14", bg='light grey')
+ip_label.place(x=25, y=20)
+port_label = tk.Label(tab6, text = 'Server TCP Port: ' + str(SERVER_PORT), font="TkDefaultFont 14", bg='light grey')
+port_label.place(x=25, y=40)
+if TLS_ENABLED:
+    str_tls = "True"
+else:
+    str_tls = "False"
+port_label = tk.Label(tab6, text = 'TLS Enabled: ' + str_tls, font="TkDefaultFont 14", bg='light grey')
+port_label.place(x=25, y=60)
+
+# Print Statistics...
+total_connections = 0
+total_time = 0.0
+last_timestamp = 0.0
+total_injections = 0
+total_hacks = 0
+server_messages = 0
+server_bytes = 0
+client_messages = 0
+client_bytes = 0
+with sqlite3.connect(db_filename) as db:
+    cursor = db.cursor()
+    sql_text = "SELECT * FROM Logs;"
+    cursor.execute(sql_text)
+    records = cursor.fetchall()
+    for record in records:
+        curr_timestamp = float(record[1])
+        if record[2] == 'C':
+            client_messages += 1
+            client_bytes += record[4]
+        else:
+            server_messages += 1
+            server_bytes += record[4]
+        if record[2] == 'C' and "Send" in record[3]:
+            total_injections += 1
+        if record[2] == 'S' and "ENABLED" in record[3]:
+            total_hacks += 1
+        if record[2] == 'S' and record[4] == 3:
+            total_connections += 1
+            start_timestamp = curr_timestamp
+            if last_timestamp > 0:
+                total_time += start_timestamp - last_timestamp
+        else:
+            last_timestamp = curr_timestamp
+    total_time += start_timestamp - last_timestamp
+
+connections_label = tk.Label(tab6, text = 'Total Numer of TCP Connections: ' + str(total_connections), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=90)
+connections_label = tk.Label(tab6, text = 'Total Server Messages: ' + str(server_messages), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=110)
+connections_label = tk.Label(tab6, text = 'Total Client Messages: ' + str(client_messages), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=130)
+connections_label = tk.Label(tab6, text = 'Total Server Bytes: ' + str(server_bytes), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=150)
+connections_label = tk.Label(tab6, text = 'Total Client Bytes: ' + str(client_bytes), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=170)
+connections_label = tk.Label(tab6, text = 'Total Numer of Hacks: ' + str(total_hacks), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=190)
+connections_label = tk.Label(tab6, text = 'Total Numer of Injections: ' + str(total_injections), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=210)
+connections_label = tk.Label(tab6, text = 'Total Connect Time: ' + get_elapsed_time(total_time), font="TkDefaultFont 14", bg='light grey')
+connections_label.place(x=25, y=230)
 # Tab : Help---
-e1 = tkk.ScrolledText(master = tab6, wrap = tk.WORD, width = 20, height = 20)
+e1 = tkk.ScrolledText(master = tab7, wrap = tk.WORD, width = 20, height = 20)
 e1.insert(tk.INSERT, readme_text)
 e1.pack(padx = 10, pady = 10, fill=tk.BOTH, expand=True)
 e1.config(state = "disabled")
@@ -877,24 +962,41 @@ if offline_mode:
     tabControl.tab(3, state="disabled")
 
 lastTab = 0
-while True:
-    # Tend to tab selection
+tabNum = -1
+
+def resize_window(event):
+    global root, lastTab, tabNum, export_label, screen_width, root_height
     tabNum = tabControl.index(tabControl.select())
     if tabNum != lastTab:
+        if tabNum == 0: # Hack Fields
+            root.geometry(str(int(screen_width))+'x'+str(root_height)+'+0+0')
+        if tabNum == 1: # Hack Colors
+            root.geometry(str(int(screen_width))+'x'+str(root_height)+'+0+0')
+        if tabNum == 2: # Inject
+            root.geometry(str(int(screen_width))+'x'+str(root_height)+'+0+0')
         if tabNum == 3: # Inject Key Presses
             aid_refresh(server_data)
-            root.geometry(str(int(screen_width * 0.99))+'x'+str(root_height)+'+0+0')
-        elif tabNum == 4: # Logs
-            root.geometry(str(int(screen_width * 0.99))+'x485+0+0')
-        elif tabNum == 5: # Help
-            root.geometry(str(int(screen_width * 0.99))+'x485+0+0')
-        else:
-            root.geometry(str(int(screen_width * 0.99))+'x'+str(root_height)+'+0+0')
+            root.geometry(str(int(screen_width))+'x'+str(root_height)+'+0+0')
+        if tabNum == 4: # Logs
+            export_label["text"] = 'Ready.'
+            root.geometry(str(int(screen_width))+'x525+0+0')
+        if tabNum == 5: # Statistics
+            root.geometry(str(int(screen_width))+'x525+0+0')
+        if tabNum == 6: # Help
+            root.geometry(str(int(screen_width))+'x525+0+0')
+
+tabControl.bind("<<NotebookTabChanged>>", resize_window)
+
+def task():
+    global root, lastTab, tabNum, silence, offline_mode, hack_on, hack_color_on
+    global hack_toggled, hack_color_toggled, inject_setup_capture, server_data, client_data
+    global client, server, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack_rnr, hack_ei
+    global hack_hv, hack_color_sfe, hack_color_mf, hack_color_sa, hack_color_hv
 
     if offline_mode:
         lastTab = tabNum
         root.update()
-        continue
+        return
 
     # Tend to client sending data
     rlist, w, e = select.select([client, server], [], [], 0)
@@ -1001,5 +1103,8 @@ while True:
     # Set lastTab to be able to tend to tab selection on next pass
     lastTab = tabNum
     root.update()
+    root.after(10, task)
 
-# Main end---
+root.after(10, task)
+root.mainloop()
+
