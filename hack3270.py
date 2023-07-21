@@ -20,7 +20,7 @@
 #  Jay Smith - email: CadmusOfThebes@protonmail.com
 #  Chance Warren
 #  Phil Young - email: mainframed767@gmail.com
-#  J.J. Loden
+#  J.J. Loden - loden.jj@gmail
 # ---------------------
 
 import sys
@@ -43,7 +43,7 @@ from pathlib import Path
 from tkinter import font
 
 NAME = "hack3270"
-VERSION = "1.2.2"
+VERSION = "1.2.5"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
@@ -54,6 +54,7 @@ BUFFER_MAX = 10000
 root_height = 100
 client_data = []
 server_data = []
+current_item = []
 hack_on = 0
 hack_color_on = 0
 silence = 0
@@ -87,6 +88,8 @@ tab7 = tk.Frame(tabControl, background="light grey")
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 hack_prot = tk.IntVar(value = 1)
+auto_server = tk.IntVar(value = 1)
+auto_client = tk.IntVar(value = 0)
 hack_sf = tk.IntVar(value = 1)
 hack_sfe = tk.IntVar(value = 1)
 hack_mf = tk.IntVar(value = 1)
@@ -568,9 +571,12 @@ def expand_CS(text):
         return("Server")
 
 def fetch_item(a):
-    global sql_cur, treev, d1, client
+    global sql_cur, treev, d1, client, auto_server, current_item
 
+    style = ttk.Style()
+    style.map('Treeview', foreground=[('focus', 'black')], background=[('focus', 'light blue')])
     current_item = treev.focus()
+        
     dict_item = treev.item(current_item)
     record_id = dict_item['values'][0]
     record_cs = dict_item['values'][2]
@@ -589,8 +595,13 @@ def fetch_item(a):
         d1.insert(tk.INSERT, parsed_3270)
         d1.config(state='disabled')
         root.update()
-        if record_cs == "Server":
+        if record_cs == "Server" and auto_server.get() == 1:
             client.send(row[5])
+        if record_cs == "Client" and auto_client.get() == 1:
+            server.send(row[5])
+    return
+
+def send_client():
     return
 
 # Main start---
@@ -625,6 +636,7 @@ if not Path(db_filename).is_file():
     if not SERVER_IP:
         usage()
         sys.exit(2)
+
 sql_con = sqlite3.connect(db_filename)
 sql_cur = sql_con.cursor()
 
@@ -649,13 +661,17 @@ if sql_cur.fetchone()[0] == 1:
         TLS_ENABLED = int(row[4])
 # else create table with current configuration---
 else:
+    print("Creating Config table...")
     sql_cur.execute('CREATE TABLE Config (CREATION_TS TEXT NOT NULL, SERVER_IP TEXT NOT NULL, SERVER_PORT INT NOT NULL, PROXY_PORT INT NOT NULL, TLS_ENABLED INT NOT NULL)')
     sql_cur.execute("INSERT INTO Config ('CREATION_TS', 'SERVER_IP', 'SERVER_PORT', 'PROXY_PORT', 'TLS_ENABLED') VALUES ('" + str(time.time()) + "', '" + SERVER_IP + "', '" + str(SERVER_PORT) + "', '" + str(PROXY_PORT) + "', '" + str(TLS_ENABLED) + "')")
+    sql_con.commit()
 
 sql_cur.execute("SELECT count(name) FROM sqlite_master WHERE TYPE='table' AND NAME='Logs'")
 if sql_cur.fetchone()[0] != 1:
     # Create table for logging---
+    print("Creating Logs table...")
     sql_cur.execute('CREATE TABLE Logs (ID INTEGER PRIMARY KEY AUTOINCREMENT, TIMESTAMP TEXT, C_S CHAR(1), NOTES TEXT, DATA_LEN INT, RAW_DATA BLOB(4000))') # 3,564
+    sql_con.commit()
     
 if not SERVER_IP and not offline_mode:
     usage()
@@ -882,9 +898,11 @@ if platform.system()=="Darwin":
 else:
     d1.place(x=25, y=235, width=screen_width - 60, height=220)
 d1.config(state = "disabled")
-export_button = ttk.Button(tab5, text = 'Export to CSV', command=export_csv, width=10).place(x=25, y=465)
+d2 = tk.Checkbutton(tab5, text='Auto Send Server', bg='light grey', variable=auto_server, onvalue=1, offvalue=0).place(x=25, y=465)
+d2 = tk.Checkbutton(tab5, text='Auto Send Client', bg='light grey', variable=auto_client, onvalue=1, offvalue=0).place(x=175, y=465)
+export_button = ttk.Button(tab5, text = 'Export to CSV', command=export_csv, width=10).place(x=345, y=465)
 export_label = tk.Label(tab5, text = 'Ready.', font="TkDefaultFont 12", bg='light grey')
-export_label.place(x=130, y=465)
+export_label.place(x=450, y=465)
 # Tab : Statistics---
 ip_label = tk.Label(tab6, text = 'Server IP Address: ' + SERVER_IP, font="TkDefaultFont 14", bg='light grey')
 ip_label.place(x=25, y=20)
@@ -901,6 +919,7 @@ port_label.place(x=25, y=60)
 total_connections = 0
 total_time = 0.0
 last_timestamp = 0.0
+start_timestamp = 0.0
 total_injections = 0
 total_hacks = 0
 server_messages = 0
@@ -992,6 +1011,8 @@ def task():
     global hack_toggled, hack_color_toggled, inject_setup_capture, server_data, client_data
     global client, server, hack_sf, hack_sfe, hack_mf, hack_prot, hack_hf, hack_rnr, hack_ei
     global hack_hv, hack_color_sfe, hack_color_mf, hack_color_sa, hack_color_hv
+    global inject_config_set, inject_preamble, inject_postamble, inject_mask_len, inject_setup_capture
+    global mask_character, inject_mask, preamble_count, postamble_count, mask_count
 
     if offline_mode:
         lastTab = tabNum
