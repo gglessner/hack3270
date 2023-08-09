@@ -43,7 +43,7 @@ from pathlib import Path
 from tkinter import font
 
 NAME = "hack3270"
-VERSION = "1.2.5"
+VERSION = "1.2.5-1"
 PROJECT_NAME = "pentest"
 SERVER_IP = ''
 SERVER_PORT = 3270
@@ -300,6 +300,8 @@ def inject_go():
             tend_server()
         if inject_key.get() == 'ENTER+CLEAR':
             send_key('CLEAR', b'\x6d')
+        elif inject_key.get() == 'ENTER+PF3':
+            send_key('PF3', b'\xf3')
         elif inject_key.get() == 'ENTER+PF3+CLEAR':
             send_key('PF3', b'\xf3')
             send_key('CLEAR', b'\x6d')
@@ -826,7 +828,7 @@ b3 = tk.Label(tab3, text='Mode:', font="TkDefaultFont 12 underline", bg='light g
 b4options = ["SKIP", "TRUNC"]
 b4 =ttk.OptionMenu(tab3, inject_trunc, b4options[0], *b4options).place(x=650, y=8)
 b5 = tk.Label(tab3, text='Keys:', font="TkDefaultFont 12 underline", bg='light grey').place(x=750, y=9)
-b6options = ["ENTER", "ENTER+CLEAR", "ENTER+PF3+CLEAR"]
+b6options = ["ENTER", "ENTER+CLEAR", "ENTER+PF3", "ENTER+PF3+CLEAR"]
 b6 =ttk.OptionMenu(tab3, inject_key, b6options[0], *b6options).place(x=800, y=8)
 # Tab : Inject Key Presses---
 send_button = ttk.Button(tab4, text = 'Send Keys', command=send_keys, width=10).place(x=25, y=12)
