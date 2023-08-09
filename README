@@ -24,7 +24,7 @@ The -o (or --offline) option selects Offline log analysis mode.  This mode will 
 
 Some initial recommendations under Kali Linux to get going:  
 
-* Currently this tool is only verified to work with KALI Linux and Windows 10 (Using Python 3.11.1); however MacOS is currently being tested.
+* Currently this tool is only verified to work with KALI Linux and Windows 10 (Using Python 3.11.1) and MacOS.
 * Use x3270 (or wx3270 under Windows) as your tn3270 terminal!
 * Select Options->Screen Size->Model 5
 * Select Options->Font and select whichever font that looks good for your screen size
