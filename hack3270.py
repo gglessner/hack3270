@@ -9,7 +9,7 @@ import logging
 
 def main():
 
-    desc = 'Hack3270 - The TN3270 Penetration Testting Toolkit'
+    desc = 'Hack3270 - The TN3270 Penetration Testing Toolkit'
     epilog = '''Example:
     %(prog)s -n prod_lpar3 10.10.10.10 992 -l 31337 --proxy_ip 0.0.0.0 --debug
     %(prog)s -o'''

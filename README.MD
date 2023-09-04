@@ -4,7 +4,7 @@ hack3270
 ```
 usage: hack.py [options] IP PORT
 
-Hack3270 - The TN3270 Penetration Testting Toolkit
+Hack3270 - The TN3270 Penetration Testing Toolkit
 
 positional arguments:
   IP                    TN3270 server IP address
