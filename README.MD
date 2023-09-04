@@ -1,5 +1,5 @@
 hack3270
---------
+========
 
 ```
 usage: hack.py [options] IP PORT
@@ -69,7 +69,7 @@ creates a lot of messages and should only be used when troubleshooting a problem
 or when submitting an issue on github. 
 
 Recommendations
-===============
+---------------
 
 Some initial recommendations under Linux to get going:  
 
@@ -97,7 +97,8 @@ Notes on how to use with DVCA (https://github.com/mainframed/DVCA):
 * Click CLEAR on the x3270 keyboard then type MCGM to lauch DVCA application, then click PF5 on x3270 keyboard
 * To exit DVCA hit the F3 button (on the virtual or real keyboard) then type KSSF, hit enter, then type `LOGOFF`
 
-!!! DVCA Demos
+DVCA Demos
+----------
 
 * The first exploit demo is exercised in the 'Hack Field Attributes' tab.  Turn the Hack Fields button on and additional (previously hidden) options will apear
 * Click on the Logs tab and scroll to the bottom of the log
