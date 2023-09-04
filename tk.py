@@ -369,7 +369,7 @@ class tkhack3270:
     def help_tab(self):
         e1 = tkk.ScrolledText(master = self.tab7, wrap = tk.WORD, width = 20, height = 20)
 
-        with open("README", "r") as readme_file:
+        with open("README.MD", "r") as readme_file:
             e1.insert(tk.INSERT, readme_file.read())
 
         e1.pack(padx = 10, pady = 10, fill=tk.BOTH, expand=True)
