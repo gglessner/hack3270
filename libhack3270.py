@@ -7,9 +7,9 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '1.2.5-2'
+__version__ = '2.0.0'
 __author__ = 'Garland Glessner'
-__license__ = "GPL"
+__license__ = "GPL-3.0"
 __name__ = "hack3270"
 
 import logging
@@ -42,6 +42,76 @@ e2a = [
   '}', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', '[0xDA]', '[0xDB]', '[0xDC]', '[0xDD]', '[0xDE]', '[0xDF]',
   '\\', '[0xE1]', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[0xEA]', '[0xEB]', '[0xEC]', '[0xED]', '[0xEE]', '[0xEF]',
   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '[0xFA]', '[0xFB]', '[0xFC]', '[0xFD]', '[0xFE]', '[0xFF]' ]
+
+# Reverse lookup: ASCII to EBCDIC (for O(1) lookup instead of O(256))
+a2e = {char: idx for idx, char in enumerate(e2a)}
+
+# Pre-compiled regex patterns for parse_telnet
+TELNET_PATTERNS = [
+    (re.compile(r'\[0xFF\]'), '[IAC]'),
+    (re.compile(r'\[0xFE\]'), "[DON'T]"),
+    (re.compile(r'\[0xFD\]'), '[DO]'),
+    (re.compile(r'\[0xFC\]'), "[WON'T]"),
+    (re.compile(r'\[0xFB\]'), '[WILL]'),
+    (re.compile(r'\[0xFA\]'), '[SB]'),
+    (re.compile(r'\[0x29\]'), '[3270-REGIME]'),
+    (re.compile(r'\[0x18\]'), '[TERMINAL-TYPE]'),
+    (re.compile(r'\[0x19\]'), '[END-OF-RECORD]'),
+    (re.compile(r'\[0x28\]'), '[TN3270E]'),
+    (re.compile(r'\[0x01\]'), '[SEND]'),
+    (re.compile(r'\[DO\]\[0x00\]'), '[DO][TRANSMIT-BINARY]'),
+    (re.compile(r"\[DON'T\]\[0x00\]"), "[DON'T][TRANSMIT-BINARY]"),
+    (re.compile(r'\[WILL\]\[0x00\]'), '[WILL][TRANSMIT-BINARY]'),
+    (re.compile(r"\[WON'T\]\[0x00\]"), "[WON'T][TRANSMIT-BINARY]"),
+    (re.compile(r'\[0x00\]'), '[IS]'),
+    (re.compile(r'\[0x49\]\[0x42\]\(\[0x2D\]\[0x33\]\[0x32\]\[0x37\]\[0x39\]\[0x2D\]\[0x32\]\[0x2D\]\[0x45\]'), '[IBM-3270-2-E]'),
+    (re.compile(r'\[0x49\]\[0x42\]\(\[0x2D\]\[0x33\]\[0x32\]\[0x37\]\[0x39\]\[0x2D\]\[0x33\]\[0x2D\]\[0x45\]'), '[IBM-3270-3-E]'),
+    (re.compile(r'\[0x49\]\[0x42\]\(\[0x2D\]\[0x33\]\[0x32\]\[0x37\]\[0x39\]\[0x2D\]\[0x34\]\[0x2D\]\[0x45\]'), '[IBM-3270-4-E]'),
+    (re.compile(r'\[0x49\]\[0x42\]\(\[0x2D\]\[0x33\]\[0x32\]\[0x37\]\[0x39\]\[0x2D\]\[0x35\]\[0x2D\]\[0x45\]'), '[IBM-3270-5-E]'),
+    (re.compile(r'\[0x49\]\[0x42\]\(\[0x2D\]\[0x33\]\[0x32\]\[0x37\]\[0x39\]\[0x2D\]\[0x44\]\[0x59\]\[0x4E\]\[0x41\]\[0x4D\]\[0x49\]\[0x43\]'), '[IBM-3270-DYNAMIC]'),
+    (re.compile(r'\[TN3270E\]\[0x08\]\[0x02\]'), '[TN3270E][SEND][DEVICE-TYPE]'),
+    (re.compile(r'\[TN3270E\]\[0x02\]\[0x07\]'), '[TN3270E][DEVICE-TYPE][REQUEST]'),
+    (re.compile(r'\[TN3270E\]\[0x02\]\[0x04\]'), '[TN3270E][DEVICE-TYPE][IS]'),
+    (re.compile(r'\]0$'), '][SE]'),
+]
+
+# Pre-compiled regex patterns for parse_3270
+TN3270_PATTERNS = [
+    (re.compile(r'\[0x29\]'), '\n[Start Field Extended]'),
+    (re.compile(r'\[0x1D\]'), '\n[Start Field]'),
+    (re.compile(r'\[Start Field\]0'), '[Start Field][11110000]'),
+    (re.compile(r'\[Start Field\]1'), '[Start Field][11110001]'),
+    (re.compile(r'\[Start Field\]2'), '[Start Field][11110010]'),
+    (re.compile(r'\[Start Field\]3'), '[Start Field][11110011]'),
+    (re.compile(r'\[Start Field\]4'), '[Start Field][11110100]'),
+    (re.compile(r'\[Start Field\]5'), '[Start Field][11110101]'),
+    (re.compile(r'\[Start Field\]6'), '[Start Field][11110110]'),
+    (re.compile(r'\[Start Field\]7'), '[Start Field][11110111]'),
+    (re.compile(r'\[Start Field\]8'), '[Start Field][11111000]'),
+    (re.compile(r'\[Start Field\]9'), '[Start Field][11111001]'),
+    (re.compile(r'\[Start Field\]A'), '[Start Field][11000001]'),
+    (re.compile(r'\[Start Field\]B'), '[Start Field][11000010]'),
+    (re.compile(r'\[Start Field\]C'), '[Start Field][11000011]'),
+    (re.compile(r'\[0x28\]'), '[Set Attribute]'),
+    (re.compile(r'\{'), '[Basic Field Attribute]'),
+    (re.compile(r'\[0x41\]\[0x00\]'), '[Highlighting - Default]'),
+    (re.compile(r'\[0x41\]0'), '[Highlighting - Normal]'),
+    (re.compile(r'\[0x41\]1'), '[Highlighting - Blink]'),
+    (re.compile(r'\[0x41\]2'), '[Highlighting - Reverse]'),
+    (re.compile(r'\[0x41\]4'), '[Highlighting - Underscore]'),
+    (re.compile(r'\[0x41\]8'), '[Highlighting - Intensity]'),
+    (re.compile(r'\[0x42\]\[0x00\]'), '[Color - Default]'),
+    (re.compile(r'\[0x42\]0'), '[Color - Neutral/Black]'),
+    (re.compile(r'\[0x42\]1'), '[Color - Blue]'),
+    (re.compile(r'\[0x42\]2'), '[Color - Red]'),
+    (re.compile(r'\[0x42\]3'), '[Color - Pink]'),
+    (re.compile(r'\[0x42\]4'), '[Color - Green]'),
+    (re.compile(r'\[0x42\]5'), '[Color - Yellow]'),
+    (re.compile(r'\[0x42\]6'), '[Color - Yellow]'),
+    (re.compile(r'\[0x42\]7'), '[Color - Neutral/White]'),
+    (re.compile(r'\[0x11\]'), '\n[Move Cursor Position]'),
+    (re.compile(r'\[Basic Field Attribute\] \[ '), '[Basic Field Attribute][0x40]['),
+]
 
 
 
@@ -101,13 +171,12 @@ class hack3270:
 
         # Passed Variable for Init
         self.project_name = project_name
-        self.server_ip  = server_ip
-        self.server_port = int(server_port)
+        self.server_ip = server_ip
+        self.server_port = int(server_port) if server_port is not None else None
         self.proxy_ip = proxy_ip
         self.proxy_port = proxy_port
         self.tls_enabled = tls_enabled
         self.offline_mode = offline_mode
-        self.offline = offline_mode
 
         # Internal Vars
         self.connected = False
@@ -122,6 +191,7 @@ class hack3270:
 
         self.db_filename = self.project_name + ".db"
         self.found_aids = [] # for keeping track of AIDs found on screen
+        self.server_data = b''  # Last server data received (for toggle resend)
 
         # State Tracking Vars
         self.hack_toggled = False
@@ -147,7 +217,7 @@ class hack3270:
         if logfile is not None:
             logger_formatter = logging.Formatter(
                 '%(levelname)s :: {} :: %(funcName)s'
-                ' :: %(message)s'.format(self.filename))
+                ' :: %(message)s'.format(logfile))
         else:
             logger_formatter = logging.Formatter(
                 '%(module)s :: %(levelname)s :: %(funcName)s :: %(lineno)d :: %(message)s')
@@ -196,7 +266,13 @@ class hack3270:
 
         # If DB file doesn't exist and Server IP address isn't set, exit---
         if not Path(self.db_filename).is_file() and not self.server_ip:
-            raise Exception("Attempt to intialize without a server IP or port")
+            if self.offline_mode:
+                print(f"Error: Project file '{self.db_filename}' not found.")
+                print(f"Offline mode requires an existing project database.")
+                print(f"Use -n to specify a project name: python hack3270.py -n <project> -o")
+                raise SystemExit(1)
+            else:
+                raise Exception("Cannot initialize without a server IP and port")
 
         self.logger.debug("Opening database file: {}".format(self.db_filename))
 
@@ -454,27 +530,6 @@ class hack3270:
         self.logger.debug(template.format("Color Set Address","hack_color_sa", self.hack_color_sa))
         self.logger.debug(template.format("Color High Visibility","hack_color_hv", self.hack_color_hv))
 
-    def reset_hack_variables_state(self):
-        '''
-        Resets all the variables back to False
-        '''
-        self.hack_toggled = False
-        self.hack_color_toggled =False
-        self.hack_on = False        # We in the butter zone now
-        self.hack_color_on = False
-        self.hack_prot = False      # 'Protected' Flag (Bit 6) 
-        self.hack_hf = False        # 'Non-display' Flag (Bit 4)
-        self.hack_rnr = False       # 'Numeric Only' Flag (Bit 5)
-        self.hack_ei = False        # enable intentisty
-        self.hack_sf = False        # Start Field
-        self.hack_sfe = False       # Start Field Extended
-        self.hack_mf = False        # Modified Field
-        self.hack_hv = False        # High Visibility
-        self.hack_color_sfe = False # 
-        self.hack_color_mf = False  # 
-        self.hack_color_sa = False  # 
-        self.hack_color_hv = False  # 
-
     def get_ip_port(self):
         '''
         returns a tuple of the server and port
@@ -529,137 +584,9 @@ class hack3270:
         '''
         return self.hack_color_on
 
-    def toggle_hack(self):
-        '''Toggles the 'hack_toggled' variable'''
-        self.logger.debug("Changing hack_toggled from {} to {}".format(
-            self.hack_toggled, not self.hack_toggled))
-        self.hack_toggled = not self.hack_toggled
-        
-    def toggle_hack_color(self):
-        '''Toggles the 'hack_color_toggled' variable'''
-        self.logger.debug("Changing hack_toggled from {} to {}".format(
-            self.hack_color_toggled, not self.hack_color_toggled))
-        self.hack_color_toggled = not self.hack_color_toggled
-
-    def set_offline(self):
-        '''Sets the offline flag'''
-        self.offline = True
-    
     def is_offline(self):
         ''' Returns True if offline, False if not'''
-        return self.offline
-
-    def toggle_hack_on(self):
-        '''
-        Inverts the hack_on state
-        '''
-        self.logger.debug("Changing hack_on from {} to {}".format(
-            self.hack_on, not self.hack_on))
-        self.hack_on = not self.hack_on
-
-    def toggle_hack_color_on(self):
-        '''
-        Inverts the hack_color_on state
-        '''
-        self.logger.debug("Changing hack_color_on from {} to {}".format(
-            self.hack_color_on, not self.hack_color_on))
-        self.hack_color_on = not self.hack_color_on
-
-    def toggle_hack_prot(self):
-        '''
-        Inverts the hack_prot state
-        '''
-        self.logger.debug("Changing hack_prot from {} to {}".format(
-            self.hack_prot, not self.hack_prot))
-        self.hack_prot = not self.hack_prot
-
-    def toggle_hack_hf(self):
-        '''
-        Inverts the hack_hf state
-        '''
-        self.logger.debug("Changing hack_hf from {} to {}".format(
-            self.hack_hf, not self.hack_hf))
-        self.hack_hf = not self.hack_hf
-
-    def toggle_hack_rnr(self):
-        '''
-        Inverts the hack_rnr state
-        '''
-        self.logger.debug("Changing hack_rnr from {} to {}".format(
-            self.hack_rnr, not self.hack_rnr))
-        self.hack_rnr = not self.hack_rnr
-
-    def toggle_hack_ei(self):
-        '''
-        Inverts the hack_ei state
-        '''
-        self.logger.debug("Changing hack_ei from {} to {}".format(
-            self.hack_ei, not self.hack_ei))
-        self.hack_ei = not self.hack_ei
-
-    def toggle_hack_sf(self):
-        '''
-        Inverts the hack_sf state
-        '''
-        self.logger.debug("Changing hack_sf from {} to {}".format(
-            self.hack_sf, not self.hack_sf))
-        self.hack_sf = not self.hack_sf
-
-    def toggle_hack_sfe(self):
-        '''
-        Inverts the hack_sfe state
-        '''
-        self.logger.debug("Changing from {} to {}".format(
-            self.hack_sfe, not self.hack_sfe))
-        self.hack_sfe = not self.hack_sfe
-
-    def toggle_hack_mf(self):
-        '''
-        Inverts the hack_mf state
-        '''
-        self.logger.debug("Changing hack_mf from {} to {}".format(
-            self.hack_mf, not self.hack_mf))
-        self.hack_mf = not self.hack_mf
-
-    def toggle_hack_hv(self):
-        '''
-        Inverts the hack_prot state
-        '''
-        self.logger.debug("Changing from {} to {}".format(
-            self.hack_hv, not self.hack_hv))
-        self.hack_hv = not self.hack_hv
-
-    def toggle_hack_color_sfe(self):
-        '''
-        Inverts the hack_color_sfe state
-        '''
-        self.logger.debug("Changing hack_color_sfe from {} to {}".format(
-            self.hack_color_sfe, not self.hack_color_sfe))
-        self.hack_color_sfe = not self.hack_color_sfe
-
-    def toggle_hack_color_mf(self):
-        '''
-        Inverts the hack_color_mf state
-        '''
-        self.logger.debug("Changing hack_color_mf from {} to {}".format(
-            self.hack_color_mf, not self.hack_color_mf))
-        self.hack_color_mf = not self.hack_color_mf
-
-    def toggle_hack_color_sa(self):
-        '''
-        Inverts the hack_color_sa state
-        '''
-        self.logger.debug("Changing hack_color_sa from {} to {}".format(
-            self.hack_color_sa, not self.hack_color_sa))
-        self.hack_color_sa = not self.hack_color_sa
-
-    def toggle_hack_color_hv(self):
-        '''
-        Inverts the hack_color_hv state
-        '''
-        self.logger.debug("Changing hack_color_hv from {} to {}".format(
-            self.hack_color_hv, not self.hack_color_hv))
-        self.hack_color_hv = not self.hack_color_hv
+        return self.offline_mode
 
     def set_inject_setup_capture(self,value=1):
         '''
@@ -869,13 +796,8 @@ class hack3270:
             if self.hack_color_on:
                 log_line = log_line + self.hack_color_on_logline()
             
-            if self.hack_on and self.hack_color_on:
-                hacked_server = self.manipulate(server_data)
-                self.client.send(hacked_server)
-            elif self.hack_on and not self.hack_color_on:
-                hacked_server = self.manipulate(server_data)
-                self.client.send(hacked_server)
-            elif not self.hack_on and self.hack_color_on:
+            # Manipulate if either hack mode is on, otherwise send raw
+            if self.hack_on or self.hack_color_on:
                 hacked_server = self.manipulate(server_data)
                 self.client.send(hacked_server)
             else:
@@ -1095,19 +1017,15 @@ class hack3270:
 
     def get_ascii(self, ebcdic_string):
         ''' Converts EBCDIC to ASCII, returns ASCII string'''
-        my_string = ""
-        for x in range(0, len(ebcdic_string)):
-            my_string += e2a[ebcdic_string[x]]
-        return my_string
+        return ''.join(e2a[byte] for byte in ebcdic_string)
 
     def get_ebcdic(self, string):
         ''' Converts ASCII to EBCDIC, returns EBCDIC bytes'''
-        my_string = b''
-        for x in range(0, len(string)):
-            for y in range(0, len(e2a)):
-                if string[x] == e2a[y]:
-                    my_string += y.to_bytes(1, 'little')
-        return(my_string)
+        result = bytearray()
+        for char in string:
+            if char in a2e:
+                result.append(a2e[char])
+        return bytes(result)
         
     def refresh_aids(self, server_data):
         '''
@@ -1315,69 +1233,16 @@ class hack3270:
         
     def parse_telnet(self, ebcdic_string):
         self.logger.debug("Parsing Telnet bytes: {}".format(ebcdic_string))
-        return_string = re.sub('\\[0xFF\\]', '[IAC]', ebcdic_string)
-        return_string = re.sub('\\[0xFE\\]', '[DON\'T]', return_string)
-        return_string = re.sub('\\[0xFD\\]', '[DO]', return_string)
-        return_string = re.sub('\\[0xFC\\]', '[WON\'T]', return_string)
-        return_string = re.sub('\\[0xFB\\]', '[WILL]', return_string)
-        return_string = re.sub('\\[0xFA\\]', '[SB]', return_string)
-        return_string = re.sub('\\[0x29\\]', '[3270-REGIME]', return_string)
-        return_string = re.sub('\\[0x18\\]', '[TERMINAL-TYPE]', return_string)
-        return_string = re.sub('\\[0x19\\]', '[END-OF-RECORD]', return_string)
-        return_string = re.sub('\\[0x28\\]', '[TN3270E]', return_string)
-        return_string = re.sub('\\[0x01\\]', '[SEND]', return_string)
-        return_string = re.sub('\\[DO\\]\\[0x00\\]', '[DO][TRANSMIT-BINARY]', return_string)
-        return_string = re.sub('\\[DON\'T\\]\\[0x00\\]', '[DON\'T][TRANSMIT-BINARY]', return_string)
-        return_string = re.sub('\\[WILL\\]\\[0x00\\]', '[WILL][TRANSMIT-BINARY]', return_string)
-        return_string = re.sub('\\[WON\'T\\]\\[0x00\\]', '[WON\'T][TRANSMIT-BINARY]', return_string)
-        return_string = re.sub('\\[0x00\\]', '[IS]', return_string)
-        return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x32\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-2-E]', return_string)
-        return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x33\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-3-E]', return_string)
-        return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x34\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-4-E]', return_string)
-        return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x35\\]\\[0x2D\\]\\[0x45\\]', '[IBM-3270-5-E]', return_string)
-        return_string = re.sub('\\[0x49\\]\\[0x42\\]\(\\[0x2D\\]\\[0x33\\]\\[0x32\\]\\[0x37\\]\\[0x39\\]\\[0x2D\\]\\[0x44\\]\\[0x59\\]\\[0x4E\\]\\[0x41\\]\\[0x4D\\]\\[0x49\\]\\[0x43\\]', '[IBM-3270-DYNAMIC]', return_string)
-        return_string = re.sub('\\[TN3270E\\]\\[0x08\\]\\[0x02\\]', '[TN3270E][SEND][DEVICE-TYPE]', return_string)
-        return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x07\\]', '[TN3270E][DEVICE-TYPE][REQUEST]', return_string)
-        return_string = re.sub('\\[TN3270E\\]\\[0x02\\]\\[0x04\\]', '[TN3270E][DEVICE-TYPE][IS]', return_string)
-        return_string = re.sub('\\]0$', '][SE]', return_string)
-        self.logger.debug("Converted to: {}".format(return_string))
-        return(return_string)
+        result = ebcdic_string
+        for pattern, replacement in TELNET_PATTERNS:
+            result = pattern.sub(replacement, result)
+        self.logger.debug("Converted to: {}".format(result))
+        return result
 
     def parse_3270(self, ebcdic_string):
         self.logger.debug("Parsing TN3270 bytes: {}".format(ebcdic_string))
-        return_string = re.sub('\\[0x29\\]', '\n[Start Field Extended]', ebcdic_string)
-        return_string = re.sub('\\[0x1D\\]', '\n[Start Field]', return_string)
-        return_string = re.sub('\\[Start Field\\]0', '[Start Field][11110000]', return_string)
-        return_string = re.sub('\\[Start Field\\]1', '[Start Field][11110001]', return_string)
-        return_string = re.sub('\\[Start Field\\]2', '[Start Field][11110010]', return_string)
-        return_string = re.sub('\\[Start Field\\]3', '[Start Field][11110011]', return_string)
-        return_string = re.sub('\\[Start Field\\]4', '[Start Field][11110100]', return_string)
-        return_string = re.sub('\\[Start Field\\]5', '[Start Field][11110101]', return_string)
-        return_string = re.sub('\\[Start Field\\]6', '[Start Field][11110110]', return_string)
-        return_string = re.sub('\\[Start Field\\]7', '[Start Field][11110111]', return_string)
-        return_string = re.sub('\\[Start Field\\]8', '[Start Field][11111000]', return_string)
-        return_string = re.sub('\\[Start Field\\]9', '[Start Field][11111001]', return_string)
-        return_string = re.sub('\\[Start Field\\]A', '[Start Field][11000001]', return_string)
-        return_string = re.sub('\\[Start Field\\]B', '[Start Field][11000010]', return_string)
-        return_string = re.sub('\\[Start Field\\]C', '[Start Field][11000011]', return_string)
-        return_string = re.sub('\\[0x28\\]', '[Set Attribute]', return_string)
-        return_string = re.sub('{', '[Basic Field Attribute]', return_string)
-        return_string = re.sub('\\[0x41\\]\\[0x00\\]', '[Highlighting - Default]', return_string)
-        return_string = re.sub('\\[0x41\\]0', '[Highlighting - Normal]', return_string)
-        return_string = re.sub('\\[0x41\\]1', '[Highlighting - Blink]', return_string)
-        return_string = re.sub('\\[0x41\\]2', '[Highlighting - Reverse]', return_string)
-        return_string = re.sub('\\[0x41\\]4', '[Highlighting - Underscore]', return_string)
-        return_string = re.sub('\\[0x41\\]8', '[Highlighting - Intensity]', return_string)
-        return_string = re.sub('\\[0x42\\]\\[0x00\\]', '[Color - Default]', return_string)
-        return_string = re.sub('\\[0x42\\]0', '[Color - Neutral/Black]', return_string)
-        return_string = re.sub('\\[0x42\\]1', '[Color - Blue]', return_string)
-        return_string = re.sub('\\[0x42\\]2', '[Color - Red]', return_string)
-        return_string = re.sub('\\[0x42\\]3', '[Color - Pink]', return_string)
-        return_string = re.sub('\\[0x42\\]4', '[Color - Green]', return_string)
-        return_string = re.sub('\\[0x42\\]5', '[Color - Yellow]', return_string)
-        return_string = re.sub('\\[0x42\\]6', '[Color - Yellow]', return_string)
-        return_string = re.sub('\\[0x42\\]7', '[Color - Neutral/White]', return_string)
-        return_string = re.sub('\\[0x11\\]', '\n[Move Cursor Position]', return_string)
-        return_string = re.sub('\\[Basic Field Attribute\\] \\[ ', '[Basic Field Attribute][0x40][', return_string)
-        self.logger.debug("Converted to: {}".format(return_string))
-        return(return_string)
+        result = ebcdic_string
+        for pattern, replacement in TN3270_PATTERNS:
+            result = pattern.sub(replacement, result)
+        self.logger.debug("Converted to: {}".format(result))
+        return result

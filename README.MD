@@ -1,10 +1,81 @@
-hack3270
-========
+# hack3270
+
+A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
+
+## Features
+
+- **Man-in-the-Middle Proxy** - Intercepts and logs all TN3270 traffic between your terminal emulator and the mainframe
+- **Field Attribute Hacking** - Disable field protection, reveal hidden fields, remove numeric-only restrictions
+- **Color Attribute Hacking** - Expose hidden text by manipulating color attributes
+- **Key Injection** - Automatically send PF keys, PA keys, and other attention identifiers
+- **Field Injection** - Brute force input fields with wordlists
+- **Session Logging** - SQLite database captures all traffic for later analysis
+- **Offline Replay** - Review captured sessions without connecting to the mainframe
+- **CSV Export** - Export logs for reporting and documentation
+
+## How It Works
+
+### Architecture
 
 ```
-usage: hack.py [options] IP PORT
+[Your Terminal Emulator] <---> [hack3270 Proxy] <---> [Mainframe]
+      (x3270/wx3270)           (localhost:3271)        (TN3270)
+```
 
-Hack3270 - The TN3270 Penetration Testing Toolkit
+You point your terminal emulator at the hack3270 proxy instead of directly at the mainframe. The proxy intercepts all traffic in both directions, allowing real-time manipulation of the 3270 data stream before it reaches your terminal.
+
+### Exposing Hidden Fields
+
+Mainframe applications use 3270 field attributes to hide sensitive data such as passwords, internal values, and debug information. The "non-display" bit (bits 3+4 of the field attribute byte) makes fields invisible to the user. hack3270 clears this bit in real-time as data passes through, revealing all hidden content on your screen.
+
+### Removing Field Protection
+
+Protected fields (bit 6 of the field attribute) are read-only - the terminal won't allow typing in them. These are often used for pre-populated values like account numbers, transaction IDs, or system-generated data. hack3270 clears this protection bit, allowing you to modify fields that should be locked and test for authorization bypass vulnerabilities.
+
+### Removing Numeric-Only Restrictions
+
+Some input fields enforce numeric-only input (bit 5), rejecting alphabetic characters at the terminal level. Clearing this restriction allows injection of unexpected characters, potentially triggering SQL injection, buffer overflows, or application errors that reveal useful information.
+
+### Exposing Color-Hidden Text
+
+Some applications hide sensitive data by setting the text color to match the background (typically black text on a black background - color code `0xF8`). hack3270 detects these color attributes and changes them to visible colors, exposing the hidden content.
+
+### PF Key Fuzzing
+
+Many mainframe applications have hidden administrative functions, debug menus, or undocumented features accessible via specific PF keys (PF1-PF24), PA keys (PA1-PA3), or other attention identifiers. hack3270 automatically sends all possible keys and logs the responses, making it easy to discover hidden functionality by identifying responses with unusual sizes or content.
+
+### Field Injection and Brute Forcing
+
+hack3270 can automate the injection of wordlist entries into input fields. This enables brute-forcing of supervisor codes, transaction identifiers, passwords, or any other input. The mask character system allows precise targeting of specific fields on the screen.
+
+### Session Logging and Replay
+
+Every packet exchanged between the terminal and mainframe is logged to a SQLite database with timestamps and metadata. Sessions can be replayed offline for analysis, exported to CSV for reporting, and reviewed to identify exactly what actions were taken during testing.
+
+## Why This Matters
+
+CICS and legacy mainframe applications were often designed with the assumption that the 3270 terminal was a trusted, "dumb" device. Security was frequently "enforced" by simply hiding fields or making them read-only at the presentation layer. This is security through obscurity - the actual data still traverses the network in the 3270 data stream.
+
+hack3270 demonstrates that these client-side controls provide no real security. By intercepting and modifying the data stream, all hidden fields become visible, all protected fields become editable, and all "enforced" restrictions can be bypassed. True security must be implemented on the server side with proper authorization checks.
+
+## Requirements
+
+- Python 3.11+
+- A TN3270 terminal emulator (x3270, c3270, or wx3270)
+
+## Installation
+
+```bash
+git clone https://github.com/gglessner/hack3270.git
+cd hack3270
+```
+
+No additional dependencies required - uses only Python standard library.
+
+## Usage
+
+```
+usage: hack3270.py [options] IP PORT
 
 positional arguments:
   IP                    TN3270 server IP address
@@ -16,110 +87,177 @@ options:
   -p PROXY_PORT, --proxy_port PROXY_PORT
                         Local TN3270 proxy port (default: 3271)
   --proxy_ip PROXY_IP   Local TN3270 proxy IP (default: 127.0.0.1)
-  -t, --tls             Enable TLS encryption for server connection (default: False)
-  -o, --offline         Offline log analysis mode (default: False)
-  -d, --debug           Print debugging statements (default: 30)
-
-Example:
-    hack.py -n prod_lpar3 10.10.10.10 992 -l 31337 --proxy_ip 0.0.0.0 --debug
-    hack.py -o
+  -t, --tls             Enable TLS encryption for server connection
+  -o, --offline         Offline log analysis mode
+  -d, --debug           Enable debug logging
 ```
 
-Notes on command line options:
+### Examples
 
-The `-n` (or `--name`) option determines the name of the SQLite3 log db file 
-that is created.  By default this is 'pentest' and will create pentest.db.  The 
-idea is that each mainframe application penetration test would have a different 
-project name and all of the logs for that test would be written to the same 
-database file.  If you stop the toolkit and then restart it will the same 
-project name it will append to the exiting log .db file.  Setting for the server
-IP, server port and local proxy port are saved as a configuration in this 
-project .db file and will be setup when opening the project.  Eventhough the 
-project DB has been setup, you need to provide these on the command line.
+```bash
+# Basic connection
+python hack3270.py 10.10.10.10 3270
 
-The `IP` and `PORT` options are to setup your connection to the mainframe. This
-IP and port will be what you normally use in your tn3270 emulator to connect to
-the mainframe. 
+# Named project with TLS
+python hack3270.py -n prod_test -t 10.10.10.10 992
 
-The `-p` (or `--proxy_port`) option sets the listening local port.  Connections
-to this port are NOT encrypted.  This allows software such as Wireshark to be
-used if the tester needs to create network packet captures; however if
-connections to the mainframe are encrypted it is recommended to only connect to
-the localhost host address (127.0.0.1) instead of connecting to this port
-remotely, which would result in unencrypted tn3270 application data traversing
-the network.
+# Expose proxy on all interfaces (for remote testing)
+python hack3270.py --proxy_ip 0.0.0.0 -p 31337 10.10.10.10 3270
 
-The `--proxy_ip` option sets the local ip address to listen on. Connections to 
-this port are NOT encrypted. The default is 127.0.0.1.
+# Offline analysis of a previous session
+python hack3270.py -n myproject -o
+```
 
-The `-t` (or `--tls`) option enables TLS for the mainframe connection.  For the 
-local connection, TLS is not implemented and is not required.
+## Quick Start
 
-The `-o` (or `--offline`) option selects Offline log analysis mode.  This mode 
-will not create a connection to the mainframe or append to the log file.  You 
-still use a tn3270 terminal emulator to connect to the local port.  Once 
-connected, selecting lines in the log of communication received from the server 
-will be present to the connected terminal emulator.  This should render the 
-display as seen during the time of testing.  Ideally your screen size should be 
-the same as used when the log file was created.  This screen size can be seen in
-the log during the initial tn3270 handshake.
+1. **Start hack3270** pointing to your mainframe:
+   ```bash
+   python hack3270.py 10.10.10.10 3270 -n mytest
+   ```
 
-The `-d` (or `--debug`) option enabled debug logging to the console. This
-creates a lot of messages and should only be used when troubleshooting a problem
-or when submitting an issue on github. 
+2. **Connect your terminal emulator** to the local proxy:
+   - Host: `127.0.0.1`
+   - Port: `3271` (default)
 
-Recommendations
----------------
+3. **Click "Continue"** when the connection is received
 
-Some initial recommendations under Linux to get going:  
+4. **Use the GUI tabs** to perform testing while interacting with the mainframe through your terminal
 
-* Currently this tool is only verified to work Python 3.11.1 on Linux
-* Use x3270 or c3270 (or wx3270 under Windows) as your tn3270 terminal!
-* Select Options->Screen Size->Model 5
-* Select Options->Font and select whichever font that looks good for your screen size
-* Click on the Keyboard icon on the top right of x3270 to display tn3270 keyboard for special keys
-* Select File->Save Changed Options then click SAVE to store these settings
+## Command Line Options
 
-It is important to keep your screen size constant to ensure that when reviewing 
-logs that the tn3270 screen will render properly.
+| Option | Description |
+|--------|-------------|
+| `-n, --name` | Project name for the SQLite log database. Each project creates a `.db` file that persists across sessions. |
+| `-p, --proxy_port` | Local port for the TN3270 proxy (default: 3271). Traffic on this port is unencrypted. |
+| `--proxy_ip` | Local IP to bind the proxy (default: 127.0.0.1). Use `0.0.0.0` to allow remote connections. |
+| `-t, --tls` | Enable TLS for the connection to the mainframe. |
+| `-o, --offline` | Replay mode - review logged sessions without connecting to the mainframe. |
+| `-d, --debug` | Enable verbose debug output to console. |
 
-Notes on how to use with DVCA (https://github.com/mainframed/DVCA):
+## GUI Tabs
 
-* To exercise tool functionality, first execute the docker container: `sudo docker run -p 3270:3270 --expose=3270 mainframed767/dvca`
-* For this example, we will use -n dvca to create a project log SQLite3 file named dvca.db: `./hack3270.py 127.0.0.1 3270 -n dvca`
-* A window should appear saying that the tool is waiting for a connetion on port 3271
-* Use x3270 and connect to 127.0.0.1 port 3271
-* The window should populate with the following text: "Connection received". and "Click to Continue"
-* Click the button and the full hack3270 GUI should launch
-* The x3270 terminal will update with a logon screen
-* Logon with DVCA password DVCA: `dvca/dvca`
-* If the DVCA user is already logged in, type `LOGON DVCA RECONNECT` then the password to reconnect to the previous logon
-* Click CLEAR on the x3270 keyboard then type MCGM to lauch DVCA application, then click PF5 on x3270 keyboard
-* To exit DVCA hit the F3 button (on the virtual or real keyboard) then type KSSF, hit enter, then type `LOGOFF`
+### Hack Field Attributes
+Manipulate 3270 field attributes in real-time:
+- Disable field protection (make read-only fields editable)
+- Reveal hidden/non-display fields
+- Remove numeric-only restrictions
+- Apply to Start Field, Start Field Extended, and Modify Field orders
+- Expose text hidden using color attributes (e.g., black text on black background)
 
-DVCA Demos
-----------
+### Inject Into Fields
+Brute force input fields using wordlists:
+1. Click **FILE** to select a wordlist
+2. Click **SETUP** and enter your mask character in the target field
+3. Click **INJECT** to iterate through the wordlist
 
-* The first exploit demo is exercised in the 'Hack Field Attributes' tab.  Turn the Hack Fields button on and additional (previously hidden) options will apear
-* Click on the Logs tab and scroll to the bottom of the log
-* The last two log entries should be data received from the server and the bottom one should say TOGGLED ON and show the set options
-* By clicking on this line, you will refresh that data to the tn3270 client, which will render the display
-* If you click the line above it (or any other Server line) that data will be resent the to tn3270 client, allowing visual review of data previously received and logged
-* By tracking these log entries, the log file may be audited to see exactly what actions the tester performed and allow the auditor to view exactly what the application looked like at the time of the test
-* Because the data sizes are shown, this log system makes it VERY easy to identify when injected data causes a unique response
-* For the next test, select the "Inject Key Presses" tab.
-* It will auto-disable any PF key that appears in the text of the screen.  Click the Send Keys button to send all of the various function keys
-* This will reveal a hidden display.  Click "Send Keys" button again and another hidden option will briefly appear
-* Select the Logs tab and review the last entries.  You will see one entry with a different response size.  Click that line to display the hidden message.  Look at the log line before that for Client data to see which key was sent
-* By reviewing futher back in the logs the specific PF key can be discovered that caused the first secret message
-* By using up and down arrow, it is possible to scroll through the log entries and also see the x3270 screen being updated in real time.  This makes it easy to identify which injected input caused which server response
-* Return to the main menu in DVCA and select option 2 (Shipping Address)
-* To brute force the supervisor code, select the "Inject into Fields" tab, then click on the FILE button and select "dvca-demo-numeric-4.txt" file.
-* Next, click SETUP button and it will tell you that your Mask character is "*" and that it is waiting for you to input data using that character.  This is used to identify the field that you wish to inject into.  Populate the 4 character of the supervisor code with "****" then hit enter
-* Click on INJECT button to brute force the supervisor password
-* Lastly, we may not have known the initial transaction of MCGM to launch this application, so we can use the "Inject into Fields" tab to solve that problem as well.
-* Exit DVCA and hit the CLEAR button in x3270 keyboard
-* Click the FILE button and select the "dvca-demo-transactions.txt" file, then click SETUP and type four of your mask character and hit enter.  If your mask is still "*" just type **** and then hit enter
-* Before clicking inject, change the Keys: option at the right to ENTER+CLEAR.  This will clear the screen to exit out of the transaction before trying the next one.  For some applications, you actually have to exit by hitting PF3.  In that instance, select the Keys option of ENTER+PF3+CLEAR
-* Click the INJECT button and several transactions will be attempted.  MCGM will briefly appear on the screen, if you have selected ENTER+CLEAR for Keys.  If you didn't change that and you still have just ENTER, it will become stuck after hitting the MCGM transaction, which is suboptimal, if you want to test a large list of possible transactions
-* Using the Log tab it is possible to review the injected transaction attempts.  Just look for Server traffic with unusual lengths, click on those line and view what the server sent
+### Inject Key Presses
+Send attention identifier keys (PF1-PF24, PA1-PA3, CLEAR, etc.) to discover hidden functions.
+
+### Logs
+- View all captured traffic with timestamps and data sizes
+- Click any entry to replay it to your terminal
+- Identify anomalies by comparing response sizes
+- Export to CSV for reporting
+
+### Statistics
+View session metrics: connection count, message counts, bytes transferred, and total test time.
+
+## Terminal Emulator Setup
+
+Recommended settings for x3270/c3270/wx3270:
+
+1. **Screen Size**: Model 5 (132x27) recommended for best visibility
+2. **Font**: Choose a monospace font appropriate for your display
+3. **Save settings** after configuration
+
+Keep your screen size consistent to ensure offline replay renders correctly.
+
+## Testing with DVCA
+
+[DVCA](https://github.com/mainframed/DVCA) (Damn Vulnerable CICS Application) is a great way to learn the toolkit.
+
+### Initial Setup
+
+1. Start the DVCA docker container:
+   ```bash
+   sudo docker run -p 3270:3270 --expose=3270 mainframed767/dvca
+   ```
+
+2. Launch hack3270 with a project name:
+   ```bash
+   python hack3270.py 127.0.0.1 3270 -n dvca
+   ```
+
+3. A window will appear saying the tool is waiting for a connection on port 3271
+
+4. Use x3270 and connect to `127.0.0.1` port `3271`
+
+5. The window will show "Connection received" - click the button to launch the full GUI
+
+6. The x3270 terminal will display the logon screen. Login with `dvca` / `dvca`
+   - If already logged in, type `LOGON DVCA RECONNECT` then enter the password
+
+7. Click CLEAR on the x3270 keyboard, type `MCGM` to launch the DVCA application, then press PF5
+
+8. To exit DVCA: press F3, type `KSSF`, press Enter, then type `LOGOFF`
+
+### Demo: Hack Field Attributes
+
+1. Go to the **Hack Field Attributes** tab and turn the Hack Fields button ON
+2. Additional previously-hidden options will appear on screen
+3. Click on the **Logs** tab and scroll to the bottom
+4. The last entries show data received from the server - the bottom one will say "TOGGLED ON" with the set options
+5. Click on any Server log line to replay that data to your terminal, rendering the display as it appeared at that moment
+6. This allows auditors to review exactly what the tester saw during testing
+7. Response sizes are shown, making it easy to identify when injected data causes unique responses
+
+### Demo: Inject Key Presses
+
+1. Go to the **Inject Key Presses** tab
+2. The tool auto-disables any PF key that appears in the screen text
+3. Click **Send Keys** to send all enabled function keys
+4. A hidden display will be revealed
+5. Click **Send Keys** again - another hidden option will briefly appear
+6. Check the **Logs** tab - look for entries with different response sizes
+7. Click those lines to display the hidden messages
+8. Look at the preceding Client log entry to see which key triggered the response
+9. Use arrow keys to scroll through log entries while watching the x3270 screen update in real-time
+
+### Demo: Brute Force Supervisor Code
+
+1. From the DVCA main menu, select option 2 (Shipping Address)
+2. Go to the **Inject into Fields** tab
+3. Click **FILE** and select `dvca-demo-numeric-4.txt`
+4. Click **SETUP** - it will show your mask character (default: `*`)
+5. In the supervisor code field, type `****` (four mask characters) and press Enter
+6. Click **INJECT** to brute force the 4-digit supervisor password
+
+### Demo: Discover Transaction Codes
+
+1. Exit DVCA and click CLEAR in the x3270 keyboard
+2. Go to **Inject into Fields** tab
+3. Click **FILE** and select `dvca-demo-transactions.txt`
+4. Click **SETUP**, type `****` (four mask characters), and press Enter
+5. Change the **Keys** option to `ENTER+CLEAR` (clears screen between attempts)
+   - For apps requiring PF3 to exit, use `ENTER+PF3+CLEAR`
+6. Click **INJECT** to test transaction codes
+7. Review the **Logs** tab - look for Server responses with unusual lengths to identify valid transactions
+
+## Security Considerations
+
+- The local proxy port is **unencrypted** by design (enables packet capture with Wireshark)
+- When testing over a network, keep the proxy bound to `127.0.0.1` unless remote access is required
+- Use `-t` for TLS connections to the mainframe
+
+## License
+
+GNU General Public License v3.0 - see [LICENSE](LICENSE) for details.
+
+## Authors
+
+- **Garland Glessner** - Original author (gglessner@gmail.com)
+- **Phil Young** (Soldier of FORTRAN) - Rewrite contributor ([@mainframed](https://github.com/mainframed))
+
+## Contributing
+
+Issues and pull requests welcome at https://github.com/gglessner/hack3270

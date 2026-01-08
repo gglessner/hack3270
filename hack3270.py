@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
+"""
+Hack3270 - The TN3270 Penetration Testing Toolkit
 
-import tk
-from tkinter import Tk
+Main entry point for the hack3270 application.
+"""
+__author__ = 'Garland Glessner'
+__license__ = "GPL-3.0"
+
+import gui
 import libhack3270
-from tkinter import ttk
 import argparse
 import logging
 
@@ -23,12 +28,14 @@ def main():
     arg_parser.add_argument('-t', '--tls', help="Enable TLS encryption for server connection (default: %(default)s)", action="store_true", default=False)
     arg_parser.add_argument('-o', '--offline', help="Offline log analysis mode (default: %(default)s)", action="store_true", default=False)
     arg_parser.add_argument('-d', '--debug', help="Print debugging statements (default: %(default)s)", action="store_const", dest="loglevel", const=logging.DEBUG, default=logging.WARNING)
-    arg_parser.add_argument("IP", help="TN3270 server IP address")
-    arg_parser.add_argument("PORT", help="TN3270 server port")
-
-
+    arg_parser.add_argument("IP", nargs='?', help="TN3270 server IP address")
+    arg_parser.add_argument("PORT", nargs='?', help="TN3270 server port")
 
     args = arg_parser.parse_args()
+
+    # Validate: IP and PORT are required unless in offline mode
+    if not args.offline and (args.IP is None or args.PORT is None):
+        arg_parser.error("IP and PORT are required unless using -o/--offline mode")
 
     hack3270 = libhack3270.hack3270(
                  server_ip = args.IP,
@@ -42,19 +49,9 @@ def main():
                  logfile=None
     )
 
-    root = Tk()
-    style = ttk.Style()
-    style.theme_create( "hackallthethings", parent="alt", settings={
-            "TButton": {"configure": {"background": "light grey" , "anchor": "center", "relief": "solid"} },
-            "Treeview": {"configure": {"background": "white" } },
-            "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
-            "TNotebook.Tab": {
-                "configure": {"padding": [5, 1], "background": "dark grey" },
-                "map":       {"background": [("selected", "light grey"), ('disabled','grey')], 
-                            "expand": [("selected", [1, 1, 1, 0])] } } } )
-    style.theme_use("hackallthethings")
-    my_gui = tk.tkhack3270(root, style, hack3270, logfile=None,loglevel=args.loglevel)
-    
+    # Launch PySide6 GUI
+    # The root and style parameters are kept for compatibility but not used
+    my_gui = gui.tkhack3270(None, None, hack3270, logfile=None, loglevel=args.loglevel)
+
 
 main()
-
