@@ -550,19 +550,22 @@ class Hack3270GUI(QMainWindow):
         send_stop_btn.clicked.connect(self.send_keys_stop)
         top_layout.addWidget(send_stop_btn)
         
+        clear_all_btn = QPushButton("CLEAR ALL")
+        clear_all_btn.clicked.connect(self.aid_clear_all)
+        top_layout.addWidget(clear_all_btn)
+        
+        defaults_btn = QPushButton("DEFAULTS")
+        defaults_btn.clicked.connect(self.aid_setdef)
+        top_layout.addWidget(defaults_btn)
+        
         self.send_label = QLabel("Ready.")
         self.send_label.setProperty("class", "status-ready")
         top_layout.addWidget(self.send_label)
         top_layout.addStretch()
         layout.addLayout(top_layout)
         
-        # AID checkboxes in scroll area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(200)
-        
-        aid_widget = QWidget()
-        aid_layout = QGridLayout(aid_widget)
+        # AID checkboxes in grid layout (no scroll area - keeps them clickable)
+        aid_layout = QGridLayout()
         aid_layout.setSpacing(10)
         
         # Define all AIDs
@@ -587,8 +590,7 @@ class Hack3270GUI(QMainWindow):
             self.aid_checkboxes[name] = cb
             aid_layout.addWidget(cb, i // cols, i % cols)
         
-        scroll.setWidget(aid_widget)
-        layout.addWidget(scroll)
+        layout.addLayout(aid_layout)
         
         layout.addSpacing(20)
         self.tabs.addTab(tab, "Inject Key Presses")
@@ -1062,14 +1064,22 @@ class Hack3270GUI(QMainWindow):
             return f"{days} days, {hours} hours, {minutes} minutes and {seconds} seconds"
     
     def aid_refresh(self):
+        """Auto-disable PF keys that appear in screen text (user can still re-enable them)"""
         aids = self.hack3270.current_aids()
-        self.aid_setdef()
+        # Only disable PF keys that are found on screen - don't reset all checkboxes
+        # This preserves user's manual selections
         for i in range(1, 25):
             pf_name = f'PF{i}'
             if pf_name in aids and pf_name in self.aid_checkboxes:
                 self.aid_checkboxes[pf_name].setChecked(False)
     
+    def aid_clear_all(self):
+        """Uncheck all AID checkboxes"""
+        for cb in self.aid_checkboxes.values():
+            cb.setChecked(False)
+    
     def aid_setdef(self):
+        """Reset all AID checkboxes to defaults"""
         defaults = {
             'NO': True, 'QREPLY': True, 'ENTER': False,
             'OICR': True, 'MSR_MHS': True, 'SELECT': True,

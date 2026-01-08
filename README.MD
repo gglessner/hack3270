@@ -2,6 +2,17 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.0.1 Changelog
+
+### Bug Fixes
+- Fixed AID checkboxes in Inject Key Presses tab being unresponsive - `aid_refresh()` was resetting all checkboxes every 10ms
+
+### New Features
+- Added **CLEAR ALL** button to Inject Key Presses tab - unchecks all AID checkboxes
+- Added **DEFAULTS** button to Inject Key Presses tab - restores default checkbox states
+
+---
+
 ## Version 2.0.0 Changelog
 
 ### GUI Rewrite - PySide6 (Qt6)
@@ -223,6 +234,8 @@ Brute force input fields using wordlists:
 Send attention identifier keys (PF1-PF24, PA1-PA3, CLEAR, etc.) to discover hidden functions.
 - Click **Send Keys** to send all checked keys
 - Click **STOP** to halt key sending mid-operation
+- Click **CLEAR ALL** to uncheck all AID checkboxes
+- Click **DEFAULTS** to restore default checkbox states
 
 ### Logs
 - View all captured traffic with timestamps and data sizes
