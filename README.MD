@@ -14,10 +14,11 @@ A Python 3 toolkit for manipulating TN3270 data streams, specifically designed f
 - Renamed `tk.py` to `gui.py` to reflect the new toolkit
 
 ### Enhanced Injection Controls
+- Added **STEP** button to Inject Into Fields tab for single-entry injection (step through wordlist one entry at a time)
 - Added **PAUSE** and **RESUME** buttons to Inject Into Fields tab for better control during brute forcing
 - Added **STOP** button to Inject Into Fields tab to halt injection mid-operation
 - Added **STOP** button to Inject Key Presses tab to halt key sending mid-operation
-- Real-time status updates show current injection state (Sending, Paused, Stopped, Ready)
+- Real-time status updates show current injection state (Sending, Paused, Stopped, Stepped, Ready)
 - Status message now shows "Mask set! Field length: X" when injection field is captured
 
 ### New Injection Wordlists
@@ -49,15 +50,19 @@ Added 18 new injection files for comprehensive mainframe penetration testing:
 - Fixed `logger_formatter` using undefined `self.filename` variable
 
 ### Performance Optimizations
-- Created module-level reverse lookup dictionary for ASCII-to-EBCDIC conversion
+- Created module-level reverse lookup dictionary (`a2e`) for ASCII-to-EBCDIC conversion - O(n) instead of O(n squared)
 - Changed `get_ascii()` to use `str.join()` instead of repeated string concatenation
-- Pre-compiled regex patterns as module-level constants
+- Pre-compiled regex patterns as module-level constants (`TELNET_PATTERNS`, `PATTERNS_3270`)
 - Refactored `send_keys()` from 35+ individual if statements to loop using `AIDS` dictionary
+- Refactored `aid_refresh()`/`aid_setdef()` using helper method `_get_pf_vars()`
 - Extracted common shutdown logic into `_shutdown()` method
 
 ### Code Cleanup
 - Removed 16 unused `toggle_*` methods
-- Removed unused methods and variables
+- Removed unused `reset_hack_variables_state()` method
+- Removed unused `set_offline()` method
+- Removed duplicate `self.offline` variable (now uses `self.offline_mode` consistently)
+- Removed unused `inject_enter` and `inject_clear` variables
 - Added author and license metadata to all source files
 
 ## Features
@@ -127,9 +132,8 @@ hack3270 demonstrates that these client-side controls provide no real security. 
 ```bash
 git clone https://github.com/gglessner/hack3270.git
 cd hack3270
+pip install -r requirements.txt
 ```
-
-No additional dependencies required - uses only Python standard library.
 
 ## Usage
 
@@ -201,15 +205,19 @@ Manipulate 3270 field attributes in real-time:
 - Reveal hidden/non-display fields
 - Remove numeric-only restrictions
 - Apply to Start Field, Start Field Extended, and Modify Field orders
+- Expose text hidden using color attributes (e.g., black text on black background)
 
 ### Inject Into Fields
 Brute force input fields using wordlists:
-1. Click **FILE** to select a wordlist
+1. Click **FILE** to select a wordlist from the `injections/` directory
 2. Click **SETUP** and enter your mask character in the target field
-3. Click **INJECT** to iterate through the wordlist
+3. Click **INJECT** to iterate through the entire wordlist automatically
+   - Or click **STEP** to inject just one entry at a time (for manual stepping through the wordlist)
 4. Use **PAUSE**/**RESUME** to temporarily halt and continue injection
 5. Click **STOP** to abort the injection at any time
 6. Click **RESET** to clear the configuration and start over
+
+**Tip:** Use **STEP** when you want fine-grained control - click it repeatedly to test entries one by one. Use **INJECT** when you want to run through the entire wordlist automatically.
 
 ### Inject Key Presses
 Send attention identifier keys (PF1-PF24, PA1-PA3, CLEAR, etc.) to discover hidden functions.
@@ -325,6 +333,7 @@ The `injections/` directory contains wordlists for brute forcing and fuzzing:
 | **SQL Injection** | `db2-injections.txt` | DB2-specific SQL injection payloads |
 | **JCL** | `jcl-injections.txt` | JCL syntax injection attempts |
 | **DVCA Demos** | `dvca-demo-*.txt` | Quick demo wordlists for DVCA testing |
+
 ## Security Considerations
 
 - The local proxy port is **unencrypted** by design (enables packet capture with Wireshark)
