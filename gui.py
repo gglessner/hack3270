@@ -1091,29 +1091,29 @@ class tkhack3270:
         # root parameter is ignored - we create our own QApplication
         self.app = QApplication.instance() or QApplication(sys.argv)
         
-        # Handle initial connection flow
+        # Handle initial connection flow - always wait for client first
+        ip, port = hack3270.get_proxy_ip_port()
+        
+        # Show connection waiting dialog
+        dialog = ConnectionDialog(f"Waiting for TN3270 connection on {ip}:{port}")
+        dialog.show()
+        QApplication.processEvents()
+        
+        # This blocks until a client connects
+        hack3270.client_connect()
+        
+        # Update dialog and wait for user click
+        dialog.set_message("Connection received.")
+        dialog.show_button()
+        dialog.wait_for_click()
+        dialog.close()
+        
         if not hack3270.is_offline():
-            ip, port = hack3270.get_proxy_ip_port()
-            
-            # Show connection waiting dialog
-            dialog = ConnectionDialog(f"Waiting for TN3270 connection on {ip}:{port}")
-            dialog.show()
-            QApplication.processEvents()
-            
-            # This blocks until a client connects
-            hack3270.client_connect()
-            
-            # Update dialog and wait for user click
-            dialog.set_message("Connection received.")
-            dialog.show_button()
-            dialog.wait_for_click()
-            dialog.close()
-            
-            # Now connect to the server
+            # Online mode - connect to the server
             hack3270.server_connect()
             hack3270.check_inject_3270e()
         else:
-            # Offline mode initialization
+            # Offline mode - replay recorded data to client
             my_record_num = 1
             while hack3270.check_record(my_record_num):
                 if hack3270.check_server(my_record_num):
