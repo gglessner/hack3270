@@ -222,6 +222,8 @@ class Hack3270GUI(QMainWindow):
         self.last_inject_config_set = False  # Track inject config state changes
         self.inject_stop_flag = False  # Flag to stop injection loop
         self.inject_pause_flag = False  # Flag to pause injection loop
+        self.inject_lines = []  # Lines loaded from injection file
+        self.inject_index = 0   # Current position in injection file
         self.send_keys_stop_flag = False  # Flag to stop send keys loop
 
         # Logger setup
@@ -480,6 +482,10 @@ class Hack3270GUI(QMainWindow):
         inject_btn.setProperty("class", "success")
         inject_btn.clicked.connect(self.inject_go)
         top_layout.addWidget(inject_btn)
+        
+        step_btn = QPushButton("STEP")
+        step_btn.clicked.connect(self.inject_step)
+        top_layout.addWidget(step_btn)
         
         pause_btn = QPushButton("PAUSE")
         pause_btn.clicked.connect(self.inject_pause)
@@ -822,81 +828,129 @@ class Hack3270GUI(QMainWindow):
         self.hack3270.set_inject_mask(mask)
         self.hack3270.set_inject_setup_capture()
     
-    def inject_go(self):
+    def _load_inject_file(self):
+        """Load injection file into memory if not already loaded"""
+        if not self.inject_lines and self.inject_filename:
+            with open(self.inject_filename, 'r') as f:
+                self.inject_lines = [line.rstrip() for line in f]
+            self.inject_index = 0
+    
+    def _inject_one_line(self, line):
+        """Inject a single line and handle key mode"""
+        if self.mode_combo.currentText() == 'TRUNC':
+            line = line[:self.hack3270.get_inject_mask_len()]
+            
+        if len(line) <= self.hack3270.get_inject_mask_len():
+            injection_ebcdic = self.hack3270.get_ebcdic(line)
+            bytes_ebcdic = (self.hack3270.get_inject_preamble() + 
+                           injection_ebcdic + 
+                           self.hack3270.get_inject_postamble())
+            self.hack3270.write_log('C', 'Sending: ' + line, bytes_ebcdic)
+            self.hack3270.send_server(bytes_ebcdic)
+            self.inject_status.setText(f"Sending: {line}")
+            self.inject_status.setProperty("class", "status-info")
+            self.inject_status.style().unpolish(self.inject_status)
+            self.inject_status.style().polish(self.inject_status)
+            QApplication.processEvents()
+            self.hack3270.tend_server()
+            
+        key_mode = self.keys_combo.currentText()
+        if key_mode == 'ENTER+CLEAR':
+            self.hack3270.send_key('CLEAR', b'\x6d')
+        elif key_mode == 'ENTER+PF3':
+            self.hack3270.send_key('PF3', b'\xf3')
+        elif key_mode == 'ENTER+PF3+CLEAR':
+            self.hack3270.send_key('PF3', b'\xf3')
+            self.hack3270.send_key('CLEAR', b'\x6d')
+    
+    def _check_inject_ready(self):
+        """Check if injection is ready, return True if ready"""
         if not self.inject_filename and not self.hack3270.get_inject_config_set():
             self.inject_status.setText("First select a file for injection, then click SETUP.")
             self.inject_status.setProperty("class", "status-error")
             self.inject_status.style().unpolish(self.inject_status)
             self.inject_status.style().polish(self.inject_status)
-            return
+            return False
         
         if not self.inject_filename:
             self.inject_status.setText("Injection file not set. Click FILE.")
             self.inject_status.setProperty("class", "status-error")
             self.inject_status.style().unpolish(self.inject_status)
             self.inject_status.style().polish(self.inject_status)
-            return
+            return False
         
         if not self.hack3270.get_inject_config_set():
             self.inject_status.setText("Field for injection hasn't been setup. Click SETUP.")
             self.inject_status.setProperty("class", "status-error")
             self.inject_status.style().unpolish(self.inject_status)
             self.inject_status.style().polish(self.inject_status)
+            return False
+        
+        return True
+    
+    def inject_step(self):
+        """Inject just ONE entry and stop"""
+        if not self._check_inject_ready():
+            return
+        
+        self._load_inject_file()
+        
+        if self.inject_index >= len(self.inject_lines):
+            self.inject_status.setText("Injection complete. Click RESET to start over.")
+            self.inject_status.setProperty("class", "status-ready")
+            self.inject_status.style().unpolish(self.inject_status)
+            self.inject_status.style().polish(self.inject_status)
+            return
+        
+        line = self.inject_lines[self.inject_index]
+        self._inject_one_line(line)
+        self.inject_index += 1
+        
+        self.inject_status.setText(f"Stepped [{self.inject_index}/{len(self.inject_lines)}]: {line}")
+        self.inject_status.setProperty("class", "status-warning")
+        self.inject_status.style().unpolish(self.inject_status)
+        self.inject_status.style().polish(self.inject_status)
+    
+    def inject_go(self):
+        """Inject all remaining entries automatically"""
+        if not self._check_inject_ready():
             return
 
-        self.inject_stop_flag = False  # Reset stop flag before starting
-        self.inject_pause_flag = False  # Reset pause flag before starting
+        self._load_inject_file()
+        self.inject_stop_flag = False
+        self.inject_pause_flag = False
         
-        with open(self.inject_filename, 'r') as f:
-            for line in f:
-                # Check if stop was requested
+        while self.inject_index < len(self.inject_lines):
+            # Check if stop was requested
+            if self.inject_stop_flag:
+                self.inject_status.setText(f"Stopped at [{self.inject_index}/{len(self.inject_lines)}]")
+                self.inject_status.setProperty("class", "status-warning")
+                self.inject_status.style().unpolish(self.inject_status)
+                self.inject_status.style().polish(self.inject_status)
+                return
+            
+            # Wait while paused
+            while self.inject_pause_flag:
                 if self.inject_stop_flag:
-                    self.inject_status.setText("Injection stopped.")
+                    self.inject_status.setText(f"Stopped at [{self.inject_index}/{len(self.inject_lines)}]")
                     self.inject_status.setProperty("class", "status-warning")
                     self.inject_status.style().unpolish(self.inject_status)
                     self.inject_status.style().polish(self.inject_status)
                     return
-                
-                # Wait while paused
-                while self.inject_pause_flag:
-                    if self.inject_stop_flag:  # Allow stop while paused
-                        self.inject_status.setText("Injection stopped.")
-                        self.inject_status.setProperty("class", "status-warning")
-                        self.inject_status.style().unpolish(self.inject_status)
-                        self.inject_status.style().polish(self.inject_status)
-                        return
-                    QApplication.processEvents()
-                
-                line = line.rstrip()
-                if self.mode_combo.currentText() == 'TRUNC':
-                    line = line[:self.hack3270.get_inject_mask_len()]
-                    
-                if len(line) <= self.hack3270.get_inject_mask_len():
-                    injection_ebcdic = self.hack3270.get_ebcdic(line)
-                    bytes_ebcdic = (self.hack3270.get_inject_preamble() + 
-                                   injection_ebcdic + 
-                                   self.hack3270.get_inject_postamble())
-                    self.hack3270.write_log('C', 'Sending: ' + line, bytes_ebcdic)
-                    self.hack3270.send_server(bytes_ebcdic)
-                    self.inject_status.setText(f"Sending: {line}")
-                    self.inject_status.setProperty("class", "status-info")
-                    self.inject_status.style().unpolish(self.inject_status)
-                    self.inject_status.style().polish(self.inject_status)
-                    QApplication.processEvents()
-                    self.hack3270.tend_server()
-                    
-                key_mode = self.keys_combo.currentText()
-                if key_mode == 'ENTER+CLEAR':
-                    self.hack3270.send_key('CLEAR', b'\x6d')
-                elif key_mode == 'ENTER+PF3':
-                    self.hack3270.send_key('PF3', b'\xf3')
-                elif key_mode == 'ENTER+PF3+CLEAR':
-                    self.hack3270.send_key('PF3', b'\xf3')
-                    self.hack3270.send_key('CLEAR', b'\x6d')
+                QApplication.processEvents()
+            
+            line = self.inject_lines[self.inject_index]
+            self._inject_one_line(line)
+            self.inject_index += 1
+        
+        self.inject_status.setText(f"Injection complete [{len(self.inject_lines)}/{len(self.inject_lines)}]")
+        self.inject_status.setProperty("class", "status-ready")
+        self.inject_status.style().unpolish(self.inject_status)
+        self.inject_status.style().polish(self.inject_status)
 
     def inject_pause(self):
         self.inject_pause_flag = True
-        self.inject_status.setText("Injection paused.")
+        self.inject_status.setText(f"Paused at [{self.inject_index}/{len(self.inject_lines)}]")
         self.inject_status.setProperty("class", "status-warning")
         self.inject_status.style().unpolish(self.inject_status)
         self.inject_status.style().polish(self.inject_status)
@@ -917,6 +971,8 @@ class Hack3270GUI(QMainWindow):
         self.last_inject_config_set = False
         self.inject_stop_flag = False
         self.inject_pause_flag = False
+        self.inject_lines = []  # Clear loaded lines
+        self.inject_index = 0   # Reset position
         self.inject_status.setText("Configuration cleared.")
         self.inject_status.setProperty("class", "status-warning")
         self.inject_status.style().unpolish(self.inject_status)
