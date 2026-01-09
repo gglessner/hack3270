@@ -2,6 +2,16 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.0.2 Changelog
+
+### New Features
+- Added **OVERFLOW** mode to Inject Into Fields - sends full wordlist entries regardless of field length
+  - Enables buffer overflow testing against COBOL/mainframe applications
+  - Status shows `[OVERFLOW]` indicator when sending oversized data
+  - Use with `injections/overflow-strings.txt` for length-based fuzzing
+
+---
+
 ## Version 2.0.1 Changelog
 
 ### Bug Fixes
@@ -365,3 +375,4 @@ GNU General Public License v3.0 - see [LICENSE](LICENSE) for details.
 ## Contributing
 
 Issues and pull requests welcome at https://github.com/gglessner/hack3270
+

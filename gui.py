@@ -518,7 +518,7 @@ class Hack3270GUI(QMainWindow):
         opts_layout.addSpacing(20)
         opts_layout.addWidget(QLabel("Mode:"))
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["SKIP", "TRUNC"])
+        self.mode_combo.addItems(["SKIP", "TRUNC", "OVERFLOW"])
         opts_layout.addWidget(self.mode_combo)
         
         opts_layout.addSpacing(20)
@@ -839,17 +839,24 @@ class Hack3270GUI(QMainWindow):
     
     def _inject_one_line(self, line):
         """Inject a single line and handle key mode"""
-        if self.mode_combo.currentText() == 'TRUNC':
-            line = line[:self.hack3270.get_inject_mask_len()]
-            
-        if len(line) <= self.hack3270.get_inject_mask_len():
+        mode = self.mode_combo.currentText()
+        mask_len = self.hack3270.get_inject_mask_len()
+        
+        if mode == 'TRUNC':
+            line = line[:mask_len]
+        
+        # OVERFLOW mode bypasses length check, SKIP mode skips long entries
+        should_inject = (mode == 'OVERFLOW' or len(line) <= mask_len)
+        
+        if should_inject:
             injection_ebcdic = self.hack3270.get_ebcdic(line)
             bytes_ebcdic = (self.hack3270.get_inject_preamble() + 
                            injection_ebcdic + 
                            self.hack3270.get_inject_postamble())
             self.hack3270.write_log('C', 'Sending: ' + line, bytes_ebcdic)
             self.hack3270.send_server(bytes_ebcdic)
-            self.inject_status.setText(f"Sending: {line}")
+            overflow_note = " [OVERFLOW]" if len(line) > mask_len else ""
+            self.inject_status.setText(f"Sending: {line}{overflow_note}")
             self.inject_status.setProperty("class", "status-info")
             self.inject_status.style().unpolish(self.inject_status)
             self.inject_status.style().polish(self.inject_status)
