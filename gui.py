@@ -10,14 +10,26 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QTabWidget, QLabel, QPushButton, QCheckBox, QComboBox, QGroupBox,
     QTreeWidget, QTreeWidgetItem, QTextEdit, QFileDialog, QHeaderView,
-    QSplitter, QFrame, QScrollArea, QSizePolicy
+    QSplitter, QFrame, QScrollArea, QSizePolicy, QLineEdit
 )
 
 class NumericTreeWidgetItem(QTreeWidgetItem):
-    """Custom QTreeWidgetItem that sorts numerically for ID (col 0) and Length (col 3)"""
+    """Custom QTreeWidgetItem that sorts numerically for ID (col 0), Delta (col 2), and Length (col 4)"""
     def __lt__(self, other):
         column = self.treeWidget().sortColumn()
-        if column in (0, 3):  # ID and Length columns
+        if column == 0:  # ID column - integer
+            try:
+                return int(self.text(column)) < int(other.text(column))
+            except ValueError:
+                pass
+        elif column == 2:  # Delta column - float, "-" should sort first
+            try:
+                self_val = float(self.text(column)) if self.text(column) != "-" else -1
+                other_val = float(other.text(column)) if other.text(column) != "-" else -1
+                return self_val < other_val
+            except ValueError:
+                pass
+        elif column == 4:  # Length column - integer
             try:
                 return int(self.text(column)) < int(other.text(column))
             except ValueError:
@@ -32,6 +44,7 @@ import platform
 import logging
 import datetime
 import re
+import csv
 
 # Suppress Qt geometry warnings (common on high-DPI/multi-monitor setups)
 def qt_message_handler(mode, context, message):
@@ -218,6 +231,8 @@ class Hack3270GUI(QMainWindow):
         
         self.hack3270 = hack3270
         self.last_db_id = 0
+        self.last_log_timestamp = None  # For calculating delta between log entries
+        self.log_follow_mode = False  # Auto-scroll to latest log entry
         self.inject_filename = ""
         self.last_inject_config_set = False  # Track inject config state changes
         self.inject_stop_flag = False  # Flag to stop injection loop
@@ -225,6 +240,7 @@ class Hack3270GUI(QMainWindow):
         self.inject_lines = []  # Lines loaded from injection file
         self.inject_index = 0   # Current position in injection file
         self.send_keys_stop_flag = False  # Flag to stop send keys loop
+        self.logs_initial_scroll_done = False  # Flag to scroll to last log on first Logs tab visit
 
         # Logger setup
         self.logger = logging.getLogger(__name__)
@@ -336,6 +352,13 @@ class Hack3270GUI(QMainWindow):
         elif index in [4, 6]:  # Logs or Help
             if index == 4:
                 self.update_logs_tab()
+                # Scroll to last item on first visit to Logs tab
+                if not self.logs_initial_scroll_done and self.log_tree.topLevelItemCount() > 0:
+                    self.logs_initial_scroll_done = True
+                    QApplication.processEvents()  # Ensure UI is ready
+                    last_item = self.log_tree.topLevelItem(self.log_tree.topLevelItemCount() - 1)
+                    self.log_tree.setCurrentItem(last_item)
+                    self.log_tree.scrollToItem(last_item, QTreeWidget.PositionAtBottom)
             target_height = max(self.user_tall_height, 500)
             if self.height() < target_height:
                 self.resize(self.screen_width, target_height)
@@ -359,6 +382,10 @@ class Hack3270GUI(QMainWindow):
             
             if self.tabs.currentIndex() == 2:  # Inject Keys tab
                 self.aid_refresh()
+            
+            # Update logs tab if we're on it, or if Follow mode is active
+            if self.tabs.currentIndex() == 4 or self.log_follow_mode:  # Logs tab or Follow mode
+                self.update_logs_tab()
             
             # Check if inject config was just set (mask captured)
             current_config = self.hack3270.get_inject_config_set()
@@ -687,20 +714,24 @@ class Hack3270GUI(QMainWindow):
         
         # Tree widget
         self.log_tree = QTreeWidget()
-        self.log_tree.setHeaderLabels(["ID", "Timestamp", "Sender", "Length", "Notes"])
+        self.log_tree.setHeaderLabels(["ID", "Timestamp", "Delta (ms)", "Sender", "Length", "Notes"])
         self.log_tree.setAlternatingRowColors(True)
-        self.log_tree.setSortingEnabled(True)
-        self.log_tree.header().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.log_tree.header().setSectionResizeMode(5, QHeaderView.Stretch)  # Notes column stretches
         self.log_tree.itemSelectionChanged.connect(self.fetch_item)
         layout.addWidget(self.log_tree, 1)
 
-        self.update_logs_tab()
-
-        # Detail text
+        # Detail text (must be defined before update_logs_tab since fetch_item uses it)
         self.log_detail = QTextEdit()
         self.log_detail.setReadOnly(True)
         self.log_detail.setMaximumHeight(200)
         layout.addWidget(self.log_detail)
+
+        self.update_logs_tab()
+        
+        # Enable sorting AFTER data is loaded, sort by ID ascending (1 at top, newest at bottom)
+        self.log_tree.setSortingEnabled(True)
+        self.log_tree.sortByColumn(0, Qt.AscendingOrder)
+        # Note: Initial scroll to last item is done in on_tab_changed when Logs tab is first shown
         
         # Bottom controls
         bottom_layout = QHBoxLayout()
@@ -713,15 +744,45 @@ class Hack3270GUI(QMainWindow):
         
         bottom_layout.addSpacing(30)
         
-        export_btn = QPushButton("Export to CSV")
+        # Search field - converts ASCII to EBCDIC and filters logs
+        bottom_layout.addWidget(QLabel("Search:"))
+        self.log_search_field = QLineEdit()
+        self.log_search_field.setPlaceholderText("ASCII → EBCDIC filter")
+        self.log_search_field.setMinimumWidth(200)
+        self.log_search_field.returnPressed.connect(self.filter_logs)  # Enter key triggers search
+        bottom_layout.addWidget(self.log_search_field)
+        
+        search_btn = QPushButton("Search")
+        search_btn.clicked.connect(self.filter_logs)
+        bottom_layout.addWidget(search_btn)
+        
+        clear_search_btn = QPushButton("Clear")
+        clear_search_btn.clicked.connect(self.clear_log_search)
+        bottom_layout.addWidget(clear_search_btn)
+        
+        bottom_layout.addSpacing(20)
+        
+        export_btn = QPushButton("Export All")
         export_btn.clicked.connect(self.export_csv)
         bottom_layout.addWidget(export_btn)
+        
+        export_visible_btn = QPushButton("Export Visible")
+        export_visible_btn.clicked.connect(self.export_visible_csv)
+        bottom_layout.addWidget(export_visible_btn)
         
         self.export_label = QLabel("Ready.")
         self.export_label.setProperty("class", "status-ready")
         bottom_layout.addWidget(self.export_label)
         
         bottom_layout.addStretch()
+        
+        # Follow button - auto-scroll to latest log entry
+        self.log_follow_btn = QPushButton("Follow: OFF")
+        self.log_follow_btn.setCheckable(True)
+        self.log_follow_btn.setProperty("class", "")
+        self.log_follow_btn.clicked.connect(self.toggle_log_follow)
+        bottom_layout.addWidget(self.log_follow_btn)
+        
         layout.addLayout(bottom_layout)
         
         self.tabs.addTab(tab, "Logs")
@@ -828,16 +889,36 @@ class Hack3270GUI(QMainWindow):
         self.tabs.addTab(tab, "Help")
         
     def update_logs_tab(self):
+        new_items_added = False
         for row in self.hack3270.all_logs(self.last_db_id):
+            current_timestamp = float(row[1])
+            
+            # Calculate delta from previous entry
+            if self.last_log_timestamp is not None:
+                delta_ms = (current_timestamp - self.last_log_timestamp) * 1000
+                delta_str = f"{delta_ms:.1f}"
+            else:
+                delta_str = "-"
+            
             item = NumericTreeWidgetItem([
                 str(row[0]),
-                str(datetime.datetime.fromtimestamp(float(row[1]))),
+                str(datetime.datetime.fromtimestamp(current_timestamp)),
+                delta_str,
                 self.hack3270.expand_CS(row[2]),
                 str(row[4]),
                 row[3]
             ])
             self.log_tree.addTopLevelItem(item)
             self.last_db_id = int(row[0])
+            self.last_log_timestamp = current_timestamp
+            new_items_added = True
+        
+        # Follow mode - scroll to and select latest entry
+        if new_items_added and self.log_follow_mode:
+            last_item = self.log_tree.topLevelItem(self.log_tree.topLevelItemCount() - 1)
+            if last_item:
+                self.log_tree.scrollToItem(last_item)
+                self.log_tree.setCurrentItem(last_item)
             
     # Button handlers
     def hack_button_pressed(self):
@@ -1260,6 +1341,132 @@ class Hack3270GUI(QMainWindow):
         self.export_label.setProperty("class", "status-ready")
         self.export_label.style().unpolish(self.export_label)
         self.export_label.style().polish(self.export_label)
+    
+    def export_visible_csv(self):
+        """Export only visible (filtered) log entries to a user-specified CSV file."""
+        # Count visible items
+        visible_count = 0
+        for i in range(self.log_tree.topLevelItemCount()):
+            if not self.log_tree.topLevelItem(i).isHidden():
+                visible_count += 1
+        
+        if visible_count == 0:
+            self.export_label.setText("No visible entries to export.")
+            self.export_label.setProperty("class", "status-warning")
+            self.export_label.style().unpolish(self.export_label)
+            self.export_label.style().polish(self.export_label)
+            return
+        
+        # Prompt for filename
+        default_name = f"{self.hack3270.project_name}_filtered.csv"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Visible Logs", default_name, "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if not filename:
+            return  # User cancelled
+        
+        self.export_label.setText(f"Exporting {visible_count} entries...")
+        self.export_label.setProperty("class", "status-warning")
+        self.export_label.style().unpolish(self.export_label)
+        self.export_label.style().polish(self.export_label)
+        QApplication.processEvents()
+        
+        try:
+            with open(filename, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                # Write header
+                writer.writerow(["ID", "Timestamp", "Sender", "Notes", "Length", "Data"])
+                
+                # Iterate visible items and export
+                for i in range(self.log_tree.topLevelItemCount()):
+                    item = self.log_tree.topLevelItem(i)
+                    if not item.isHidden():
+                        item_id = int(item.text(0))
+                        # Get full record from database
+                        records = self.hack3270.get_log(item_id)
+                        if records and len(records) > 0:
+                            row = records[0]
+                            ebcdic_data = self.hack3270.get_ascii(row[5])
+                            if re.search("^tn3270 ", row[3]):
+                                parsed_3270 = self.hack3270.parse_telnet(ebcdic_data)
+                            else:
+                                parsed_3270 = self.hack3270.parse_3270(ebcdic_data)
+                            data = parsed_3270.replace('\n', ' ')
+                            writer.writerow([row[0], row[1], row[2], row[3], row[4], data])
+            
+            self.export_label.setText(f"Exported {visible_count} entries to {filename}")
+            self.export_label.setProperty("class", "status-ready")
+        except Exception as e:
+            self.export_label.setText(f"Export failed: {str(e)}")
+            self.export_label.setProperty("class", "status-warning")
+        
+        self.export_label.style().unpolish(self.export_label)
+        self.export_label.style().polish(self.export_label)
+    
+    def toggle_log_follow(self):
+        """Toggle log follow mode - auto-scroll to latest entry."""
+        self.log_follow_mode = self.log_follow_btn.isChecked()
+        if self.log_follow_mode:
+            self.log_follow_btn.setText("Follow: ON")
+            self.log_follow_btn.setProperty("class", "success")
+            # Jump to latest entry immediately
+            if self.log_tree.topLevelItemCount() > 0:
+                last_item = self.log_tree.topLevelItem(self.log_tree.topLevelItemCount() - 1)
+                self.log_tree.scrollToItem(last_item)
+                self.log_tree.setCurrentItem(last_item)
+        else:
+            self.log_follow_btn.setText("Follow: OFF")
+            self.log_follow_btn.setProperty("class", "")
+        self.log_follow_btn.style().unpolish(self.log_follow_btn)
+        self.log_follow_btn.style().polish(self.log_follow_btn)
+    
+    def filter_logs(self):
+        """Filter log entries by EBCDIC-converted search string."""
+        search_text = self.log_search_field.text()
+        if not search_text:
+            # Show all items when search is empty
+            for i in range(self.log_tree.topLevelItemCount()):
+                self.log_tree.topLevelItem(i).setHidden(False)
+            return
+        
+        # Convert search text to EBCDIC bytes
+        try:
+            ebcdic_search = self.hack3270.get_ebcdic(search_text)
+        except:
+            return  # Invalid characters, skip filtering
+        
+        # Iterate through all tree items
+        for i in range(self.log_tree.topLevelItemCount()):
+            item = self.log_tree.topLevelItem(i)
+            item_id = int(item.text(0))
+            
+            # Get the log record from database
+            try:
+                records = self.hack3270.get_log(item_id)
+                if records and len(records) > 0:
+                    record = records[0]  # get_log returns fetchall(), take first row
+                    # record[5] is the RAW_DATA binary blob
+                    binary_data = record[5] if len(record) > 5 else b''
+                    # Check if EBCDIC search string is in the binary data
+                    if ebcdic_search in binary_data:
+                        item.setHidden(False)
+                    else:
+                        item.setHidden(True)
+                else:
+                    item.setHidden(True)
+            except:
+                item.setHidden(True)
+    
+    def clear_log_search(self):
+        """Clear the log search field, show all entries, and scroll to the last one."""
+        self.log_search_field.clear()
+        self.filter_logs()  # Show all entries since search text is now empty
+        # Scroll to and select the last entry
+        if self.log_tree.topLevelItemCount() > 0:
+            last_item = self.log_tree.topLevelItem(self.log_tree.topLevelItemCount() - 1)
+            self.log_tree.setCurrentItem(last_item)
+            self.log_tree.scrollToItem(last_item, QTreeWidget.PositionAtBottom)
     
     def get_elapsed_time(self, elapsed):
         if elapsed < 60:

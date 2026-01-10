@@ -2,6 +2,27 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.1.2 Changelog
+
+### Export Enhancements
+- **Export Visible**: New button exports only filtered/visible log entries to a user-specified CSV file
+- Renamed "Export to CSV" to "Export All" for clarity
+- Fixed UTF-8 encoding for CSV export to handle special characters
+
+---
+
+## Version 2.1.1 Changelog
+
+### Enhanced Logs Tab
+
+- **Delta (ms) Column**: New column showing the time difference in milliseconds between consecutive log entries - useful for timing analysis (e.g., detecting valid vs. invalid credentials based on response time)
+- **Follow Mode**: New "Follow" button auto-scrolls to and selects the newest log entry in real-time - perfect for monitoring live injection attacks
+- **Log Search**: New search field converts ASCII input to EBCDIC and filters log entries containing that data - click "Search" or press Enter to filter
+- **Clear Button**: Restores all log entries and scrolls to the last entry
+- **Auto-scroll on First Visit**: Logs tab now automatically scrolls to and selects the last entry when first opened
+
+---
+
 ## Version 2.1.0 Changelog
 
 ### New Feature: AID Spoofing

@@ -7,7 +7,7 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '2.1.0'
+__version__ = '2.1.2'
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 __name__ = "hack3270"
@@ -421,10 +421,10 @@ class hack3270:
         self.logger.debug("Start: {}".format(start))
         if start > 0 :
             self.logger.debug("Getting all records starting at {}".format(start))
-            self.sql_cur.execute("SELECT * FROM Logs WHERE ID > {}".format(start))
+            self.sql_cur.execute("SELECT * FROM Logs WHERE ID > {} ORDER BY ID ASC".format(start))
         else:
             self.logger.debug("Getting all records from database")
-            self.sql_cur.execute("SELECT * FROM Logs")
+            self.sql_cur.execute("SELECT * FROM Logs ORDER BY ID ASC")
 
         return self.sql_cur.fetchall()
     
