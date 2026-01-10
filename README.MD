@@ -1,14 +1,60 @@
-﻿# hack3270
+# hack3270
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.1.0 Changelog
+
+### New Feature: AID Spoofing
+
+Added new **AID Spoofing** tab with Attention Identifier manipulation capabilities:
+
+#### Manual Mode
+- Toggle to enable/disable AID spoofing
+- Select any AID value (ENTER, PF1-24, PA1-3, CLEAR, etc.) to replace outgoing AIDs
+- All transmissions from the terminal will have their AID replaced with the selected value
+- Attack scenario: Send form data but report it as CLEAR to bypass validation routines
+
+#### Fuzzer Mode
+- **ARM** button captures the next terminal transmission
+- Automatically replays the captured data 256 times (0x00-0xFF)
+- Tests all possible AID values including invalid/undefined ones
+- **STOP** button pauses fuzzing at current progress
+- **RESUME** button continues fuzzing from where it paused
+- All responses logged to SQLite database for analysis
+- Progress updates shown in status area
+- Check Logs tab to analyze response differences, timing, and errors
+
+#### Attack Scenarios
+- **Bypass input validation**: Send user data with PF12 (Cancel) AID to skip validation
+- **State machine confusion**: Send data with unexpected AID to trigger wrong code path
+- **Error handler exploitation**: Invalid AIDs may trigger poorly-tested error handlers
+- **Edge case testing**: PA keys "shouldn't" have data, but your data is still sent
+
+#### Real-World Testing Notes
+
+**TSO/VTAM (TK4- tested):** When sending login data with AID set to "NO" (0x60), TSO's TGET routine detected the unusual AID and displayed a debug message:
+```
+IKTXLOG TGET RC=X'18',LEN=X'00B4',DATA=X'60000E81808081848586878895A1A600'
+```
+This shows TSO has protection - it flagged the spoofed AID with return code 0x18. The raw data stream shows the 0x60 (NO) AID was received along with the field data.
+
+**CICS Applications:** Many CICS programs lack this level of TGET protection and rely purely on EIBAID checks in COBOL. These are more vulnerable to AID spoofing attacks because:
+- No system-level validation of expected AIDs
+- Application code must explicitly check EIBAID
+- Missing or incomplete EVALUATE statements allow unexpected code paths
+
+**Recommendation:** Test AID spoofing against CICS transaction programs rather than TSO login screens for higher success rates.
+
+---
+
 ## Version 2.0.2 Changelog
 
-### New Features
-- Added **OVERFLOW** mode to Inject Into Fields - sends full wordlist entries regardless of field length
-  - Enables buffer overflow testing against COBOL/mainframe applications
-  - Status shows `[OVERFLOW]` indicator when sending oversized data
-  - Use with `injections/overflow-strings.txt` for length-based fuzzing
+### New Features: Field Overflow Mode
+- Added **OVERFLOW** option to injection Mode dropdown (alongside SKIP and TRUNC)
+- OVERFLOW mode sends the full wordlist entry regardless of the field's defined length
+- Bypasses terminal's field length enforcement at the proxy level
+- Status shows `[OVERFLOW]` indicator when sending oversized data
+- Attack scenario: Test if COBOL validation checks occur before or after data truncation
 
 ---
 
@@ -71,7 +117,7 @@ Added 18 new injection files for comprehensive mainframe penetration testing:
 - Fixed `logger_formatter` using undefined `self.filename` variable
 
 ### Performance Optimizations
-- Created module-level reverse lookup dictionary (`a2e`) for ASCII-to-EBCDIC conversion - O(n) instead of O(n squared)
+- Created module-level reverse lookup dictionary (`a2e`) for ASCII-to-EBCDIC conversion - O(n) instead of O(n²)
 - Changed `get_ascii()` to use `str.join()` instead of repeated string concatenation
 - Pre-compiled regex patterns as module-level constants (`TELNET_PATTERNS`, `PATTERNS_3270`)
 - Refactored `send_keys()` from 35+ individual if statements to loop using `AIDS` dictionary
@@ -247,6 +293,23 @@ Send attention identifier keys (PF1-PF24, PA1-PA3, CLEAR, etc.) to discover hidd
 - Click **CLEAR ALL** to uncheck all AID checkboxes
 - Click **DEFAULTS** to restore default checkbox states
 
+### AID Spoofing (new in v2.1.0)
+Manipulate the Attention Identifier byte in outgoing transmissions:
+
+**Manual Mode:**
+- Toggle to enable AID spoofing
+- Select any AID value (ENTER, PF1-24, PA1-3, CLEAR, etc.)
+- All transmissions will have their AID replaced with the selected value
+- Attack scenario: Send form data but report it as CLEAR to bypass validation
+
+**Fuzzer Mode:**
+- Click **ARM** to prepare for fuzzing
+- Send any transmission from your terminal
+- The tool captures it and replays 256 times with all AID values (0x00-0xFF)
+- Click **STOP** to pause fuzzing, **RESUME** to continue
+- All responses logged to database for analysis
+- Check Logs tab to find response differences, errors, or timing anomalies
+
 ### Logs
 - View all captured traffic with timestamps and data sizes
 - Click any entry to replay it to your terminal
@@ -375,4 +438,3 @@ GNU General Public License v3.0 - see [LICENSE](LICENSE) for details.
 ## Contributing
 
 Issues and pull requests welcome at https://github.com/gglessner/hack3270
-
