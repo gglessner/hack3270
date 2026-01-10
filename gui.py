@@ -265,8 +265,9 @@ class Hack3270GUI(QMainWindow):
         self.tab0_height = 200   # Tab 0: Hack Field Attributes
         self.tab1_height = 180   # Tab 1: Inject Into Fields
         self.tab2_height = 250   # Tab 2: Inject Key Presses
-        self.tab4_height = 425   # Tab 4: Statistics
-        self.tall_height = 525   # Tabs 3 & 5: Logs and Help
+        self.tab3_height = 180   # Tab 3: AID Spoofing (same as Inject Into Fields)
+        self.tab5_height = 425   # Tab 5: Statistics
+        self.tall_height = 525   # Tabs 4 & 6: Logs and Help
         self.user_tall_height = self.tall_height  # Remember user's preferred tall height
         
         # Central widget
@@ -293,13 +294,14 @@ class Hack3270GUI(QMainWindow):
         self.create_hack_fields_tab()
         self.create_inject_fields_tab()
         self.create_inject_keys_tab()
+        self.create_aid_spoofing_tab()
         self.create_logs_tab()
         self.create_statistics_tab()
         self.create_help_tab()
         
         # Disable tabs in offline mode
         if self.hack3270.is_offline():
-            for i in range(3):
+            for i in range(4):  # Disable first 4 tabs (including AID Spoofing)
                 self.tabs.setTabEnabled(i, False)
         
         # Full horizontal width, start with tab 0 height
@@ -313,8 +315,10 @@ class Hack3270GUI(QMainWindow):
         
     def on_tab_changed(self, index):
         """Keep full width, minimize height on compact tabs, restore tall on Logs/Help"""
+        # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing, 4=Logs, 5=Statistics, 6=Help
+        
         # Save tall height when leaving Logs or Help
-        if self.last_tab_index in [3, 5]:
+        if self.last_tab_index in [4, 6]:
             self.user_tall_height = self.height()
         
         # Handle height - each tab has its own height
@@ -324,11 +328,13 @@ class Hack3270GUI(QMainWindow):
             self.resize(self.screen_width, self.tab1_height)
         elif index == 2:  # Inject Key Presses
             self.resize(self.screen_width, self.tab2_height)
-        elif index == 4:  # Statistics
-            self.resize(self.screen_width, self.tab4_height)
+        elif index == 3:  # AID Spoofing
+            self.resize(self.screen_width, self.tab3_height)
+        elif index == 5:  # Statistics
+            self.resize(self.screen_width, self.tab5_height)
         
-        elif index in [3, 5]:  # Logs or Help
-            if index == 3:
+        elif index in [4, 6]:  # Logs or Help
+            if index == 4:
                 self.update_logs_tab()
             target_height = max(self.user_tall_height, 500)
             if self.height() < target_height:
@@ -345,7 +351,12 @@ class Hack3270GUI(QMainWindow):
         if self.hack3270.is_offline():
             return
         try:
-            self.hack3270.daemon()
+            # Run AID fuzzer iteration if active
+            if self.hack3270.aid_fuzzer_running:
+                self.hack3270.run_aid_fuzzer(None)
+            else:
+                self.hack3270.daemon()
+            
             if self.tabs.currentIndex() == 2:  # Inject Keys tab
                 self.aid_refresh()
             
@@ -594,6 +605,81 @@ class Hack3270GUI(QMainWindow):
         
         layout.addSpacing(20)
         self.tabs.addTab(tab, "Inject Key Presses")
+    
+    def create_aid_spoofing_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Controls row
+        controls_layout = QHBoxLayout()
+        
+        # Toggle
+        self.aid_spoof_toggle = QCheckBox("Spoof AID")
+        self.aid_spoof_toggle.toggled.connect(self.on_aid_spoof_toggle)
+        controls_layout.addWidget(self.aid_spoof_toggle)
+        
+        controls_layout.addSpacing(20)
+        
+        # Mode selection
+        controls_layout.addWidget(QLabel("Mode:"))
+        self.aid_mode_combo = QComboBox()
+        self.aid_mode_combo.addItems(["MANUAL", "FUZZER"])
+        self.aid_mode_combo.setEnabled(False)
+        self.aid_mode_combo.currentTextChanged.connect(self.on_aid_mode_changed)
+        controls_layout.addWidget(self.aid_mode_combo)
+        
+        controls_layout.addSpacing(20)
+        
+        # AID selection (for MANUAL mode)
+        self.aid_select_label = QLabel("AID:")
+        self.aid_select_label.setEnabled(False)
+        controls_layout.addWidget(self.aid_select_label)
+        self.aid_select_combo = QComboBox()
+        self.aid_select_combo.addItems(list(libhack3270.hack3270.AIDS.keys()))
+        self.aid_select_combo.setCurrentText("ENTER")
+        self.aid_select_combo.setEnabled(False)
+        self.aid_select_combo.currentTextChanged.connect(self.on_aid_select_changed)
+        controls_layout.addWidget(self.aid_select_combo)
+        
+        # ARM button (for FUZZER mode)
+        self.aid_arm_btn = QPushButton("ARM")
+        self.aid_arm_btn.setProperty("class", "warning")
+        self.aid_arm_btn.setEnabled(False)
+        self.aid_arm_btn.setVisible(False)
+        self.aid_arm_btn.clicked.connect(self.on_aid_arm_clicked)
+        controls_layout.addWidget(self.aid_arm_btn)
+        
+        # STOP button (for FUZZER mode)
+        self.aid_stop_btn = QPushButton("STOP")
+        self.aid_stop_btn.setProperty("class", "danger")
+        self.aid_stop_btn.setEnabled(False)
+        self.aid_stop_btn.setVisible(False)
+        self.aid_stop_btn.clicked.connect(self.on_aid_stop_clicked)
+        controls_layout.addWidget(self.aid_stop_btn)
+        
+        # RESUME button (for FUZZER mode)
+        self.aid_resume_btn = QPushButton("RESUME")
+        self.aid_resume_btn.setProperty("class", "success")
+        self.aid_resume_btn.setEnabled(False)
+        self.aid_resume_btn.setVisible(False)
+        self.aid_resume_btn.clicked.connect(self.on_aid_resume_clicked)
+        controls_layout.addWidget(self.aid_resume_btn)
+        
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+        
+        # Status row
+        status_layout = QHBoxLayout()
+        status_layout.addWidget(QLabel("Status:"))
+        self.aid_status_label = QLabel("Disabled")
+        self.aid_status_label.setProperty("class", "status-warning")
+        status_layout.addWidget(self.aid_status_label)
+        status_layout.addStretch()
+        layout.addLayout(status_layout)
+        
+        layout.addStretch()
+        self.tabs.addTab(tab, "AID Spoofing")
         
     def create_logs_tab(self):
         tab = QWidget()
@@ -791,6 +877,130 @@ class Hack3270GUI(QMainWindow):
     def hack_color_toggle(self):
         self.set_checkbox_values()
         self.hack3270.set_hack_color_toggled(1)
+
+    # AID Spoofing methods
+    def on_aid_spoof_toggle(self, checked):
+        """Handle AID spoof toggle."""
+        self.hack3270.set_aid_spoof_enabled(checked)
+        self.aid_mode_combo.setEnabled(checked)
+        
+        if checked:
+            # Update controls based on current mode
+            self.on_aid_mode_changed(self.aid_mode_combo.currentText())
+            if self.aid_mode_combo.currentText() == 'MANUAL':
+                self.aid_status_label.setText(f"Spoofing all AIDs to {self.aid_select_combo.currentText()}")
+            else:
+                self.aid_status_label.setText("Ready. Click ARM then send from terminal.")
+            self.aid_status_label.setProperty("class", "status-ready")
+        else:
+            self.aid_select_label.setEnabled(False)
+            self.aid_select_combo.setEnabled(False)
+            self.aid_arm_btn.setEnabled(False)
+            self.aid_arm_btn.setVisible(False)
+            self.aid_status_label.setText("Disabled")
+            self.aid_status_label.setProperty("class", "status-warning")
+            self.hack3270.disarm_aid_fuzzer()
+        
+        self.aid_status_label.style().unpolish(self.aid_status_label)
+        self.aid_status_label.style().polish(self.aid_status_label)
+
+    def on_aid_mode_changed(self, mode):
+        """Handle AID mode change between MANUAL and FUZZER."""
+        self.hack3270.set_aid_spoof_mode(mode)
+        
+        if mode == 'MANUAL':
+            self.aid_select_label.setVisible(True)
+            self.aid_select_combo.setVisible(True)
+            self.aid_select_label.setEnabled(True)
+            self.aid_select_combo.setEnabled(True)
+            self.aid_arm_btn.setVisible(False)
+            self.aid_arm_btn.setEnabled(False)
+            self.aid_stop_btn.setVisible(False)
+            self.aid_stop_btn.setEnabled(False)
+            self.aid_resume_btn.setVisible(False)
+            self.aid_resume_btn.setEnabled(False)
+            if self.aid_spoof_toggle.isChecked():
+                self.aid_status_label.setText(f"Spoofing all AIDs to {self.aid_select_combo.currentText()}")
+                self.aid_status_label.setProperty("class", "status-ready")
+        else:  # FUZZER
+            self.aid_select_label.setVisible(False)
+            self.aid_select_combo.setVisible(False)
+            self.aid_select_label.setEnabled(False)
+            self.aid_select_combo.setEnabled(False)
+            self.aid_arm_btn.setVisible(True)
+            self.aid_arm_btn.setEnabled(True)
+            self.aid_stop_btn.setVisible(True)
+            self.aid_stop_btn.setEnabled(False)  # Enabled when fuzzing starts
+            self.aid_resume_btn.setVisible(True)
+            self.aid_resume_btn.setEnabled(False)  # Enabled when paused
+            if self.aid_spoof_toggle.isChecked():
+                self.aid_status_label.setText("Ready. Click ARM then send from terminal.")
+                self.aid_status_label.setProperty("class", "status-ready")
+        
+        self.aid_status_label.style().unpolish(self.aid_status_label)
+        self.aid_status_label.style().polish(self.aid_status_label)
+
+    def on_aid_select_changed(self, aid_name):
+        """Handle AID selection change in MANUAL mode."""
+        self.hack3270.set_aid_spoof_value(aid_name)
+        if self.aid_spoof_toggle.isChecked():
+            self.aid_status_label.setText(f"Spoofing all AIDs to {aid_name}")
+            self.aid_status_label.setProperty("class", "status-ready")
+            self.aid_status_label.style().unpolish(self.aid_status_label)
+            self.aid_status_label.style().polish(self.aid_status_label)
+
+    def on_aid_arm_clicked(self):
+        """Handle ARM button click for FUZZER mode."""
+        self.hack3270.set_aid_fuzzer_callback(self.aid_fuzzer_callback)
+        self.hack3270.arm_aid_fuzzer()
+        self.aid_arm_btn.setEnabled(False)
+        self.aid_status_label.setText("Armed. Waiting for transmission...")
+        self.aid_status_label.setProperty("class", "status-warning")
+        self.aid_status_label.style().unpolish(self.aid_status_label)
+        self.aid_status_label.style().polish(self.aid_status_label)
+
+    def aid_fuzzer_callback(self, state, progress, total, aid_name):
+        """Callback from libhack3270 for fuzzer status updates."""
+        if state == 'captured':
+            self.aid_status_label.setText("Captured! Fuzzing... 0/256")
+            self.aid_status_label.setProperty("class", "status-info")
+            self.aid_stop_btn.setEnabled(True)
+        elif state == 'progress':
+            self.aid_status_label.setText(f"Fuzzing... {progress}/256 (0x{progress-1:02X} - {aid_name})")
+            self.aid_status_label.setProperty("class", "status-info")
+        elif state == 'complete':
+            self.aid_status_label.setText("Complete! 256 AIDs tested. Check Logs tab.")
+            self.aid_status_label.setProperty("class", "status-ready")
+            self.aid_arm_btn.setEnabled(True)
+            self.aid_stop_btn.setEnabled(False)
+            self.aid_resume_btn.setEnabled(False)
+        elif state == 'stopped':
+            self.aid_status_label.setText(f"Stopped at {progress}/256. Click ARM to restart.")
+            self.aid_status_label.setProperty("class", "status-warning")
+            self.aid_arm_btn.setEnabled(True)
+            self.aid_stop_btn.setEnabled(False)
+            self.aid_resume_btn.setEnabled(False)
+        elif state == 'paused':
+            self.aid_status_label.setText(f"Paused at {progress}/256. Click RESUME to continue.")
+            self.aid_status_label.setProperty("class", "status-warning")
+            self.aid_stop_btn.setEnabled(True)
+            self.aid_resume_btn.setEnabled(True)
+        elif state == 'resumed':
+            self.aid_status_label.setText(f"Resumed. Fuzzing... {progress}/256")
+            self.aid_status_label.setProperty("class", "status-info")
+            self.aid_resume_btn.setEnabled(False)
+        
+        self.aid_status_label.style().unpolish(self.aid_status_label)
+        self.aid_status_label.style().polish(self.aid_status_label)
+        QApplication.processEvents()
+
+    def on_aid_stop_clicked(self):
+        """Handle STOP button click for FUZZER mode - pauses the fuzzer."""
+        self.hack3270.pause_aid_fuzzer()
+
+    def on_aid_resume_clicked(self):
+        """Handle RESUME button click for FUZZER mode."""
+        self.hack3270.resume_aid_fuzzer()
 
     def set_checkbox_values(self):
         self.hack3270.set_hack_prot(1 if self.hack_prot_cb.isChecked() else 0)

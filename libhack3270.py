@@ -7,7 +7,7 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '2.0.2'
+__version__ = '2.1.0'
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 __name__ = "hack3270"
@@ -209,7 +209,19 @@ class hack3270:
         self.hack_color_sfe = False # 
         self.hack_color_mf = False  # 
         self.hack_color_sa = False  # 
-        self.hack_color_hv = False  # 
+        self.hack_color_hv = False  #
+
+        # AID Spoofing State
+        self.aid_spoof_enabled = False
+        self.aid_spoof_mode = 'MANUAL'  # 'MANUAL' or 'FUZZER'
+        self.aid_spoof_value = 'ENTER'  # Selected AID name for manual mode
+        self.aid_fuzzer_armed = False
+        self.aid_fuzzer_running = False
+        self.aid_fuzzer_paused = False
+        self.aid_fuzzer_stopped = False
+        self.aid_fuzzer_captured_data = None
+        self.aid_fuzzer_progress = 0
+        self.aid_fuzzer_callback = None  # GUI callback for status updates 
 
         # Create the Loggers (file and stderr)
         self.logger = logging.getLogger(__name__)
@@ -830,9 +842,26 @@ class hack3270:
                 self.logger.debug("Client: {}".format(self.get_ascii(client_data)))
                 if self.inject_setup_capture:
                     self.capture_mask(client_data)
+                # AID Fuzzer capture mode
+                elif self.aid_spoof_enabled and self.aid_spoof_mode == 'FUZZER' and self.aid_fuzzer_armed and not self.aid_fuzzer_running:
+                    # Capture this transmission for fuzzing
+                    self.aid_fuzzer_captured_data = client_data
+                    self.aid_fuzzer_armed = False
+                    self.aid_fuzzer_running = True
+                    self.aid_fuzzer_progress = 0
+                    self.logger.debug("AID Fuzzer: Captured transmission, starting fuzz")
+                    if self.aid_fuzzer_callback:
+                        self.aid_fuzzer_callback('captured', 0, 256, None)
+                    # Don't send yet - fuzzer loop will handle it
+                # AID Manual spoof mode
+                elif self.aid_spoof_enabled and self.aid_spoof_mode == 'MANUAL' and len(client_data) >= 1:
+                    modified_data, orig_aid, spoof_aid = self.spoof_aid(client_data)
+                    log_msg = f"AID Spoofed: {orig_aid} -> {spoof_aid}"
+                    self.write_database_log('C', log_msg, modified_data)
+                    self.server.send(modified_data)
                 else:
                     self.write_database_log('C', '', client_data)
-                self.server.send(client_data)
+                    self.server.send(client_data)
 
         # Tend to server sending data
         if self.server in rlist:
@@ -940,6 +969,145 @@ class hack3270:
     
     def write_log(self, direction, notes, data):
         self.write_database_log(direction, notes, data)
+
+    # AID Spoofing Methods
+    def set_aid_spoof_enabled(self, enabled):
+        """Enable or disable AID spoofing."""
+        self.aid_spoof_enabled = enabled
+        self.logger.debug(f"AID Spoofing: {'enabled' if enabled else 'disabled'}")
+
+    def set_aid_spoof_mode(self, mode):
+        """Set AID spoof mode: 'MANUAL' or 'FUZZER'."""
+        self.aid_spoof_mode = mode
+        self.logger.debug(f"AID Spoof Mode: {mode}")
+
+    def set_aid_spoof_value(self, aid_name):
+        """Set the AID value to spoof to (for MANUAL mode)."""
+        self.aid_spoof_value = aid_name
+        self.logger.debug(f"AID Spoof Value: {aid_name}")
+
+    def arm_aid_fuzzer(self):
+        """Arm the AID fuzzer to capture the next transmission."""
+        self.aid_fuzzer_armed = True
+        self.aid_fuzzer_captured_data = None
+        self.aid_fuzzer_progress = 0
+        self.logger.debug("AID Fuzzer armed")
+
+    def disarm_aid_fuzzer(self):
+        """Disarm the AID fuzzer."""
+        self.aid_fuzzer_armed = False
+        self.aid_fuzzer_running = False
+        self.aid_fuzzer_paused = False
+        self.aid_fuzzer_stopped = False
+        self.aid_fuzzer_captured_data = None
+        self.aid_fuzzer_progress = 0
+        self.logger.debug("AID Fuzzer disarmed")
+
+    def stop_aid_fuzzer(self):
+        """Stop the AID fuzzer."""
+        self.aid_fuzzer_stopped = True
+        self.aid_fuzzer_paused = False
+        self.aid_fuzzer_running = False
+        self.logger.debug("AID Fuzzer stopped")
+        if self.aid_fuzzer_callback:
+            self.aid_fuzzer_callback('stopped', self.aid_fuzzer_progress, 256, None)
+
+    def resume_aid_fuzzer(self):
+        """Resume the AID fuzzer after pause."""
+        if self.aid_fuzzer_paused and not self.aid_fuzzer_stopped:
+            self.aid_fuzzer_paused = False
+            self.aid_fuzzer_running = True
+            self.logger.debug("AID Fuzzer resumed")
+            if self.aid_fuzzer_callback:
+                self.aid_fuzzer_callback('resumed', self.aid_fuzzer_progress, 256, None)
+
+    def pause_aid_fuzzer(self):
+        """Pause the AID fuzzer."""
+        self.aid_fuzzer_paused = True
+        self.aid_fuzzer_running = False
+        self.logger.debug("AID Fuzzer paused")
+        if self.aid_fuzzer_callback:
+            self.aid_fuzzer_callback('paused', self.aid_fuzzer_progress, 256, None)
+
+    def set_aid_fuzzer_callback(self, callback):
+        """Set callback function for fuzzer status updates."""
+        self.aid_fuzzer_callback = callback
+
+    def get_aid_name(self, aid_byte):
+        """Get the AID name from a byte value."""
+        for name, value in self.AIDS.items():
+            if value == aid_byte:
+                return name
+        return f"0x{aid_byte.hex().upper()}"
+
+    def spoof_aid(self, client_data):
+        """
+        Replace the AID byte in client data with the spoofed value.
+        Returns the modified data.
+        """
+        if len(client_data) < 1:
+            return client_data
+        
+        original_aid = client_data[0:1]
+        original_aid_name = self.get_aid_name(original_aid)
+        
+        # Get the spoofed AID byte
+        spoofed_aid = self.AIDS.get(self.aid_spoof_value, original_aid)
+        spoofed_aid_name = self.aid_spoof_value
+        
+        # Replace first byte with spoofed AID
+        modified_data = spoofed_aid + client_data[1:]
+        
+        self.logger.debug(f"AID Spoofed: {original_aid_name} -> {spoofed_aid_name}")
+        return modified_data, original_aid_name, spoofed_aid_name
+
+    def run_aid_fuzzer(self, client_data):
+        """
+        Run the AID fuzzer - replay captured data with all 256 AID values.
+        This is called from the GUI's timer loop.
+        Returns True if fuzzing is complete, False if still running.
+        """
+        # Check if stopped or paused
+        if self.aid_fuzzer_stopped:
+            return True
+        
+        if self.aid_fuzzer_paused:
+            return False  # Still "running" but paused
+        
+        if not self.aid_fuzzer_running:
+            return True
+        
+        if self.aid_fuzzer_progress >= 256:
+            # Fuzzing complete
+            self.aid_fuzzer_running = False
+            self.aid_fuzzer_armed = False
+            if self.aid_fuzzer_callback:
+                self.aid_fuzzer_callback('complete', 256, 256, None)
+            return True
+        
+        # Get current AID byte to test
+        aid_byte = bytes([self.aid_fuzzer_progress])
+        aid_name = self.get_aid_name(aid_byte)
+        
+        # Replace AID in captured data
+        fuzzed_data = aid_byte + self.aid_fuzzer_captured_data[1:]
+        
+        # Log and send
+        log_msg = f"AID Fuzz: {self.aid_fuzzer_progress}/255 (0x{self.aid_fuzzer_progress:02X} - {aid_name})"
+        self.write_database_log('C', log_msg, fuzzed_data)
+        self.server.send(fuzzed_data)
+        
+        # Wait for and log response
+        self.tend_server()
+        
+        # Update progress
+        self.aid_fuzzer_progress += 1
+        
+        # Callback to update GUI
+        if self.aid_fuzzer_callback:
+            self.aid_fuzzer_callback('progress', self.aid_fuzzer_progress, 256, aid_name)
+        
+        return False
 
     def capture_mask(self, client_data):
 
