@@ -1002,6 +1002,9 @@ class Hack3270GUI(QMainWindow):
                         item.setForeground(0, QColor("#ff6b6b"))  # Red
                         item.setForeground(5, QColor("#ff6b6b"))
                     
+                    # Center align Req and Resp columns
+                    item.setTextAlignment(1, Qt.AlignCenter)
+                    item.setTextAlignment(2, Qt.AlignCenter)
                     self.analysis_tree.addTopLevelItem(item)
         
         # ===== KEY INJECTION (AID) ANALYSIS =====
@@ -1078,6 +1081,9 @@ class Hack3270GUI(QMainWindow):
                     ])
                     item.setForeground(0, QColor("#6bcb77"))  # Green
                     item.setForeground(5, QColor("#6bcb77"))
+                    # Center align Req and Resp columns
+                    item.setTextAlignment(1, Qt.AlignCenter)
+                    item.setTextAlignment(2, Qt.AlignCenter)
                     self.analysis_tree.addTopLevelItem(item)
                 
                 prev_entry = entry
@@ -1152,6 +1158,9 @@ class Hack3270GUI(QMainWindow):
                     ])
                     item.setForeground(0, QColor("#ff6b6b"))  # Red
                     item.setForeground(5, QColor("#ff6b6b"))
+                    # Center align Req and Resp columns
+                    item.setTextAlignment(1, Qt.AlignCenter)
+                    item.setTextAlignment(2, Qt.AlignCenter)
                     self.analysis_tree.addTopLevelItem(item)
                 
                 prev_entry = entry
