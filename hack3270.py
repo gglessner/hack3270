@@ -7,6 +7,7 @@ Main entry point for the hack3270 application.
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 
+import sys
 import gui
 import libhack3270
 import argparse
@@ -54,4 +55,15 @@ def main():
     my_gui = gui.tkhack3270(None, None, hack3270, logfile=None, loglevel=args.loglevel)
 
 
-main()
+if __name__ == '__main__':
+    try:
+        main()
+    except libhack3270.Hack3270Error as e:
+        print(f"\nError: {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\nUnexpected error: {e}", file=sys.stderr)
+        sys.exit(1)

@@ -2,6 +2,77 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.3.2 Changelog
+
+### Analysis Tab Export
+- **Export CSV**: New button exports analysis results to CSV file
+- Exports all columns: Type, Request ID, Response ID, Value/Key, Length, Finding
+- UTF-8 encoding for proper character handling
+
+---
+
+## Version 2.3.1 Changelog
+
+### Analysis Tab Improvements
+- **AID Fuzzer Detection**: Now detects `AID Fuzz:` and `AID Spoofed:` patterns in addition to `Sending key:`
+- **Numeric Sorting**: Results sorted numerically by Request ID (same as Logs tab)
+- All three AID sources detected: Inject Keys, AID Fuzzer, AID Spoof Manual
+
+---
+
+## Version 2.3.0 Changelog
+
+### Redesigned Analysis Tab
+
+Completely rebuilt **Analysis Tab** with three distinct detection methods:
+
+#### 1. Hidden Field Detection
+- Scans server responses for hidden fields revealed by Hack Fields mode
+- Detects the `[Highlighting - Reverse][Color - Yellow]` pattern that indicates hidden content
+- **Requires**: Hack Field Attributes enabled with "Show Hidden: 1"
+- Distinguishes between:
+  - **Hidden Labels**: Field names that were hidden (yellow)
+  - **Hidden Values**: Actual data in hidden fields (red - critical)
+- Example findings: `Purchaseable: Y`, `99) Delete Order History`
+
+#### 2. AID Key Injection Analysis
+- Detects screen transitions during automated key injection attacks
+- Uses **response length mode** as baseline (most common length = normal response)
+- Flags any key that produces a different response length
+- Shows transition with before/after: `PA2(1567) -> PA3(1889) [+322]`
+- Works regardless of Hack Fields mode
+
+#### 3. Field Injection Analysis
+- Detects content changes during field injection attacks (e.g., PIN/password brute force)
+- **Normalizes responses** by removing echoed injected values before comparison
+- Uses **content mode** as baseline (most common response content)
+- Flags when response content differs (even if length is identical)
+- Shows transition: `1336 -> 1337 (content changed)`
+
+#### Concise Results Display
+- **Type**: Hidden, AID, or Field
+- **Req/Resp**: Request and response log IDs
+- **Value/Key**: The injected value or AID key
+- **Len**: Response length
+- **Finding**: Concise description of the finding
+
+#### Replay Functionality
+- Click any finding to view full request/response detail
+- **Auto Send Server**: Replays response to terminal
+- **Auto Send Client**: Replays request to mainframe
+
+#### Status Summary
+Shows counts: "Found: 3 hidden values, 2 hidden labels, 1 AID transitions, 1 field transitions"
+
+---
+
+## Version 2.2.0 Changelog
+
+### Initial Analysis Tab
+- First implementation of Analysis Tab with threshold-based detection
+
+---
+
 ## Version 2.1.2 Changelog
 
 ### Export Enhancements

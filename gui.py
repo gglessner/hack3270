@@ -35,6 +35,17 @@ class NumericTreeWidgetItem(QTreeWidgetItem):
             except ValueError:
                 pass
         return self.text(column) < other.text(column)
+
+class AnalysisTreeWidgetItem(QTreeWidgetItem):
+    """Custom QTreeWidgetItem for Analysis tab - sorts Req(1), Resp(2), Len(4) numerically"""
+    def __lt__(self, other):
+        column = self.treeWidget().sortColumn()
+        if column in (1, 2, 4):  # Req, Resp, Len columns - integer
+            try:
+                return int(self.text(column)) < int(other.text(column))
+            except ValueError:
+                pass
+        return self.text(column) < other.text(column)
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, qInstallMessageHandler, QtMsgType
 from PySide6.QtGui import QFont, QColor, QPalette, QAction
 import libhack3270
@@ -312,6 +323,7 @@ class Hack3270GUI(QMainWindow):
         self.create_inject_keys_tab()
         self.create_aid_spoofing_tab()
         self.create_logs_tab()
+        self.create_analysis_tab()
         self.create_statistics_tab()
         self.create_help_tab()
         
@@ -330,11 +342,11 @@ class Hack3270GUI(QMainWindow):
         self.on_tab_changed(self.tabs.currentIndex())
         
     def on_tab_changed(self, index):
-        """Keep full width, minimize height on compact tabs, restore tall on Logs/Help"""
-        # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing, 4=Logs, 5=Statistics, 6=Help
+        """Keep full width, minimize height on compact tabs, restore tall on Logs/Analysis/Help"""
+        # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing, 4=Logs, 5=Analysis, 6=Statistics, 7=Help
         
-        # Save tall height when leaving Logs or Help
-        if self.last_tab_index in [4, 6]:
+        # Save tall height when leaving tall tabs (Logs, Analysis, Help)
+        if self.last_tab_index in [4, 5, 7]:
             self.user_tall_height = self.height()
         
         # Handle height - each tab has its own height
@@ -346,10 +358,10 @@ class Hack3270GUI(QMainWindow):
             self.resize(self.screen_width, self.tab2_height)
         elif index == 3:  # AID Spoofing
             self.resize(self.screen_width, self.tab3_height)
-        elif index == 5:  # Statistics
+        elif index == 6:  # Statistics
             self.resize(self.screen_width, self.tab5_height)
         
-        elif index in [4, 6]:  # Logs or Help
+        elif index in [4, 5, 7]:  # Logs, Analysis, or Help
             if index == 4:
                 self.update_logs_tab()
                 # Scroll to last item on first visit to Logs tab
@@ -858,6 +870,391 @@ class Hack3270GUI(QMainWindow):
         layout.addWidget(stats_group)
         layout.addSpacing(20)
         self.tabs.addTab(tab, "Statistics")
+    
+    def create_analysis_tab(self):
+        """Create the Analysis tab for detecting injection anomalies."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Controls row
+        controls_layout = QHBoxLayout()
+        
+        # Analyze button
+        analyze_btn = QPushButton("Analyze Logs")
+        analyze_btn.setProperty("class", "success")
+        analyze_btn.clicked.connect(self.run_analysis)
+        controls_layout.addWidget(analyze_btn)
+        
+        controls_layout.addSpacing(10)
+        
+        self.analysis_status = QLabel("Ready")
+        controls_layout.addWidget(self.analysis_status)
+        
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+        
+        # Results tree
+        self.analysis_tree = QTreeWidget()
+        self.analysis_tree.setHeaderLabels([
+            "Type", "Req", "Resp", "Value/Key", "Len", "Finding"
+        ])
+        self.analysis_tree.setAlternatingRowColors(True)
+        self.analysis_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.analysis_tree.header().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.analysis_tree.itemSelectionChanged.connect(self.analysis_item_selected)
+        layout.addWidget(self.analysis_tree, 1)
+        
+        # Detail view
+        self.analysis_detail = QTextEdit()
+        self.analysis_detail.setReadOnly(True)
+        self.analysis_detail.setMaximumHeight(200)
+        layout.addWidget(self.analysis_detail)
+        
+        # Bottom controls (like Logs tab)
+        bottom_layout = QHBoxLayout()
+        self.analysis_auto_server_cb = QCheckBox("Auto Send Server")
+        self.analysis_auto_server_cb.setChecked(True)
+        bottom_layout.addWidget(self.analysis_auto_server_cb)
+        
+        self.analysis_auto_client_cb = QCheckBox("Auto Send Client")
+        bottom_layout.addWidget(self.analysis_auto_client_cb)
+        
+        bottom_layout.addSpacing(20)
+        
+        analysis_export_btn = QPushButton("Export CSV")
+        analysis_export_btn.clicked.connect(self.export_analysis_csv)
+        bottom_layout.addWidget(analysis_export_btn)
+        
+        self.analysis_export_label = QLabel("")
+        bottom_layout.addWidget(self.analysis_export_label)
+        
+        bottom_layout.addStretch()
+        layout.addLayout(bottom_layout)
+        
+        self.tabs.addTab(tab, "Analysis")
+    
+    def run_analysis(self):
+        """Scan logs for hidden fields and injection transitions."""
+        self.analysis_tree.clear()
+        self.analysis_status.setText("Analyzing...")
+        QApplication.processEvents()
+        
+        # Get all logs
+        all_logs = self.hack3270.all_logs()
+        if not all_logs:
+            self.analysis_status.setText("No logs to analyze.")
+            return
+        
+        from collections import Counter
+        
+        # Patterns for detection
+        HIDDEN_FIELD_PATTERN = r'\[Highlighting - Default\]\[Highlighting - Reverse\]\[Color - Yellow\]([^\[\]]+)'
+        HACK_FIELDS_ENABLED = r'Hack Field Attributes.*Show Hidden:\s*1'
+        # Match: "Sending key: PA3", "AID Fuzz: 107/255 (0x6B - PA3)", "AID Spoofed: ENTER -> PA3"
+        KEY_INJECTION_PATTERN = r'Sending key:\s*(.+)'
+        AID_FUZZ_PATTERN = r'AID Fuzz:\s*\d+/\d+\s*\([^-]+-\s*([^)]+)\)'
+        AID_SPOOF_PATTERN = r'AID Spoofed:\s*\w+\s*->\s*(\w+)'
+        FIELD_INJECTION_PATTERN = r'Sending:\s*(.+)'
+        
+        hidden_values = 0
+        hidden_labels = 0
+        key_transitions = 0
+        field_transitions = 0
+        
+        # ===== HIDDEN FIELD ANALYSIS =====
+        for record in all_logs:
+            record_id = record[0]
+            sender = record[2]
+            notes = record[3]
+            data = self.hack3270.parse_3270(self.hack3270.get_ascii(record[5])) if record[5] else ""
+            
+            # Only check server responses with Hack Fields enabled
+            if sender == 'S' and re.search(HACK_FIELDS_ENABLED, notes):
+                matches = re.findall(HIDDEN_FIELD_PATTERN, data)
+                for match in matches:
+                    content = match.strip()
+                    if not content:
+                        continue
+                    
+                    # Determine if label or value
+                    if content.endswith(':'):
+                        hidden_labels += 1
+                        item = AnalysisTreeWidgetItem([
+                            "Hidden",
+                            str(record_id),
+                            str(record_id),
+                            content.rstrip(':')[:15],
+                            str(record[4]),
+                            f"Label: {content.rstrip(':')}"
+                        ])
+                        item.setForeground(5, QColor("#ffd93d"))  # Yellow
+                    else:
+                        hidden_values += 1
+                        item = AnalysisTreeWidgetItem([
+                            "Hidden",
+                            str(record_id),
+                            str(record_id),
+                            content[:15],
+                            str(record[4]),
+                            f"VALUE: {content}"
+                        ])
+                        item.setForeground(0, QColor("#ff6b6b"))  # Red
+                        item.setForeground(5, QColor("#ff6b6b"))
+                    
+                    self.analysis_tree.addTopLevelItem(item)
+        
+        # ===== KEY INJECTION (AID) ANALYSIS =====
+        # Detect: Sending key, AID Fuzz, AID Spoof
+        key_injections = []
+        for i, record in enumerate(all_logs):
+            if record[2] == 'C':  # Client
+                key_name = None
+                
+                # Try each pattern
+                match = re.search(KEY_INJECTION_PATTERN, record[3])
+                if match:
+                    key_name = match.group(1).strip()
+                else:
+                    match = re.search(AID_FUZZ_PATTERN, record[3])
+                    if match:
+                        key_name = match.group(1).strip()
+                    else:
+                        match = re.search(AID_SPOOF_PATTERN, record[3])
+                        if match:
+                            key_name = match.group(1).strip()
+                
+                if key_name:
+                    # Find next server response
+                    for j in range(i + 1, min(i + 5, len(all_logs))):
+                        if all_logs[j][2] == 'S':
+                            key_injections.append({
+                                'request_id': record[0],
+                                'timestamp': float(record[1]),
+                                'response_id': all_logs[j][0],
+                                'key': key_name,
+                                'length': all_logs[j][4]
+                            })
+                            break
+        
+        # Group key injections by timing (< 2 seconds apart = same sequence)
+        key_sequences = []
+        if key_injections:
+            current_seq = [key_injections[0]]
+            for i in range(1, len(key_injections)):
+                if key_injections[i]['timestamp'] - key_injections[i-1]['timestamp'] < 2.0:
+                    current_seq.append(key_injections[i])
+                else:
+                    if len(current_seq) >= 2:
+                        key_sequences.append(current_seq)
+                    current_seq = [key_injections[i]]
+            if len(current_seq) >= 2:
+                key_sequences.append(current_seq)
+        
+        # Analyze each key sequence for length transitions
+        for sequence in key_sequences:
+            lengths = [e['length'] for e in sequence]
+            mode_length = Counter(lengths).most_common(1)[0][0]
+            
+            prev_entry = None
+            prev_was_normal = True
+            
+            for entry in sequence:
+                is_anomaly = entry['length'] != mode_length
+                
+                if prev_entry and prev_was_normal and is_anomaly:
+                    key_transitions += 1
+                    diff = entry['length'] - mode_length
+                    diff_str = f"+{diff}" if diff > 0 else str(diff)
+                    
+                    # Single combined entry showing the transition
+                    item = AnalysisTreeWidgetItem([
+                        "AID",
+                        str(entry['request_id']),
+                        str(entry['response_id']),
+                        entry['key'],
+                        str(entry['length']),
+                        f"{prev_entry['key']}({mode_length}) -> {entry['key']}({entry['length']}) [{diff_str}]"
+                    ])
+                    item.setForeground(0, QColor("#6bcb77"))  # Green
+                    item.setForeground(5, QColor("#6bcb77"))
+                    self.analysis_tree.addTopLevelItem(item)
+                
+                prev_entry = entry
+                prev_was_normal = not is_anomaly
+        
+        # ===== FIELD INJECTION ANALYSIS =====
+        field_injections = []
+        for i, record in enumerate(all_logs):
+            if record[2] == 'C':  # Client
+                match = re.search(FIELD_INJECTION_PATTERN, record[3])
+                if match:
+                    value = match.group(1).strip()
+                    # Find next server response
+                    for j in range(i + 1, min(i + 5, len(all_logs))):
+                        if all_logs[j][2] == 'S':
+                            # Get parsed response for content comparison
+                            resp_data = self.hack3270.parse_3270(
+                                self.hack3270.get_ascii(all_logs[j][5])
+                            ) if all_logs[j][5] else ""
+                            field_injections.append({
+                                'request_id': record[0],
+                                'timestamp': float(record[1]),
+                                'response_id': all_logs[j][0],
+                                'value': value,
+                                'length': all_logs[j][4],
+                                'data': resp_data
+                            })
+                            break
+        
+        # Group field injections by timing
+        field_sequences = []
+        if field_injections:
+            current_seq = [field_injections[0]]
+            for i in range(1, len(field_injections)):
+                if field_injections[i]['timestamp'] - field_injections[i-1]['timestamp'] < 2.0:
+                    current_seq.append(field_injections[i])
+                else:
+                    if len(current_seq) >= 2:
+                        field_sequences.append(current_seq)
+                    current_seq = [field_injections[i]]
+            if len(current_seq) >= 2:
+                field_sequences.append(current_seq)
+        
+        # Analyze each field sequence for content transitions
+        for sequence in field_sequences:
+            # Normalize responses by removing echoed injected value
+            for entry in sequence:
+                entry['normalized'] = entry['data'].replace(entry['value'], '<<INJ>>')
+            
+            # Find mode (most common normalized response)
+            response_counts = Counter(e['normalized'] for e in sequence)
+            baseline = response_counts.most_common(1)[0][0]
+            mode_count = response_counts.most_common(1)[0][1]
+            
+            prev_entry = None
+            prev_was_normal = True
+            
+            for entry in sequence:
+                is_anomaly = entry['normalized'] != baseline
+                
+                if prev_entry and prev_was_normal and is_anomaly:
+                    field_transitions += 1
+                    
+                    # Single combined entry showing the transition
+                    item = AnalysisTreeWidgetItem([
+                        "Field",
+                        str(entry['request_id']),
+                        str(entry['response_id']),
+                        entry['value'],
+                        str(entry['length']),
+                        f"{prev_entry['value']} -> {entry['value']} (content changed)"
+                    ])
+                    item.setForeground(0, QColor("#ff6b6b"))  # Red
+                    item.setForeground(5, QColor("#ff6b6b"))
+                    self.analysis_tree.addTopLevelItem(item)
+                
+                prev_entry = entry
+                prev_was_normal = not is_anomaly
+        
+        # Sort results by Request ID (column 1) numerically
+        self.analysis_tree.sortItems(1, Qt.AscendingOrder)
+        
+        # Update status
+        parts = []
+        if hidden_values > 0:
+            parts.append(f"{hidden_values} hidden values")
+        if hidden_labels > 0:
+            parts.append(f"{hidden_labels} hidden labels")
+        if key_transitions > 0:
+            parts.append(f"{key_transitions} AID transitions")
+        if field_transitions > 0:
+            parts.append(f"{field_transitions} field transitions")
+        
+        if parts:
+            self.analysis_status.setText("Found: " + ", ".join(parts))
+        else:
+            self.analysis_status.setText("No findings.")
+    
+    def analysis_item_selected(self):
+        """Handle selection of an analysis result - show detail and optionally replay."""
+        items = self.analysis_tree.selectedItems()
+        if not items:
+            return
+        
+        item = items[0]
+        request_id = int(item.text(1))
+        response_id = int(item.text(2))
+        
+        # Get and display the response record
+        detail_text = f"=== REQUEST (ID: {request_id}) ===\n"
+        for row in self.hack3270.get_log(request_id):
+            ebcdic_data = self.hack3270.get_ascii(row[5])
+            if re.search("^tn3270 ", row[3]):
+                detail_text += self.hack3270.parse_telnet(ebcdic_data)
+            else:
+                detail_text += self.hack3270.parse_3270(ebcdic_data)
+            
+            # Auto-send client data if enabled
+            if self.analysis_auto_client_cb.isChecked():
+                self.hack3270.send_server(row[5])
+        
+        detail_text += f"\n\n=== RESPONSE (ID: {response_id}) ===\n"
+        for row in self.hack3270.get_log(response_id):
+            ebcdic_data = self.hack3270.get_ascii(row[5])
+            if re.search("^tn3270 ", row[3]):
+                detail_text += self.hack3270.parse_telnet(ebcdic_data)
+            else:
+                detail_text += self.hack3270.parse_3270(ebcdic_data)
+            
+            # Auto-send server data if enabled
+            if self.analysis_auto_server_cb.isChecked():
+                self.hack3270.send_client(row[5])
+        
+        self.analysis_detail.setPlainText(detail_text)
+    
+    def export_analysis_csv(self):
+        """Export analysis results to a CSV file."""
+        item_count = self.analysis_tree.topLevelItemCount()
+        
+        if item_count == 0:
+            self.analysis_export_label.setText("No results to export.")
+            return
+        
+        # Prompt for filename
+        default_name = f"{self.hack3270.project_name}_analysis.csv"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Analysis", default_name, "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if not filename:
+            return  # User cancelled
+        
+        self.analysis_export_label.setText(f"Exporting {item_count} entries...")
+        QApplication.processEvents()
+        
+        try:
+            import csv
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # Write header matching tree columns
+                writer.writerow(["Type", "Request ID", "Response ID", "Value/Key", "Length", "Finding"])
+                
+                # Export all items
+                for i in range(item_count):
+                    item = self.analysis_tree.topLevelItem(i)
+                    writer.writerow([
+                        item.text(0),  # Type
+                        item.text(1),  # Req
+                        item.text(2),  # Resp
+                        item.text(3),  # Value/Key
+                        item.text(4),  # Len
+                        item.text(5)   # Finding
+                    ])
+            
+            self.analysis_export_label.setText(f"Exported {item_count} entries")
+        except Exception as e:
+            self.analysis_export_label.setText(f"Export failed: {str(e)}")
         
     def create_help_tab(self):
         tab = QWidget()

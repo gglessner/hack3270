@@ -7,7 +7,7 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '2.1.2'
+__version__ = '2.3.2'
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 __name__ = "hack3270"
@@ -23,6 +23,22 @@ import csv
 import datetime
 
 from pathlib import Path
+
+
+class Hack3270Error(Exception):
+    """Base exception for hack3270 errors."""
+    pass
+
+
+class ConnectionError(Hack3270Error):
+    """Raised when connection to the TN3270 server fails."""
+    pass
+
+
+class ProjectConfigError(Hack3270Error):
+    """Raised when project configuration doesn't match existing database."""
+    pass
+
 
 # EBCDIC to ASCII table
 e2a = [
@@ -308,20 +324,22 @@ class hack3270:
                 self.logger.debug(row)
 
                 if self.server_ip != row[1] and self.offline_mode == 0:
-                    raise Exception("Error! IP setting doesn't match server " 
-                                    "IP address in existing project file! "
-                                    "Server IP: {} != Project IP: {}".format(
-                                            self.server_ip, row[1]
-                                    ))
+                    raise ProjectConfigError(
+                        f"IP address mismatch with existing project '{self.project_name}.db'.\n"
+                        f"  Command line: {self.server_ip}\n"
+                        f"  Project file: {row[1]}\n"
+                        f"Either use the correct IP or delete '{self.project_name}.db' to start fresh."
+                    )
                 self.server_ip = row[1]
 
                 self.logger.debug('{} {}'.format(type(self.server_port),type(row[2])))
                 if self.server_port != int(row[2])  and self.offline_mode == 0:
-                    raise Exception("Error! -p setting doesn't match server " 
-                                   "TCP port address in existing project file! "
-                                    "Server port: {} != Project IP: {}".format(
-                                            self.server_port, row[2]
-                                    ))
+                    raise ProjectConfigError(
+                        f"Server port mismatch with existing project '{self.project_name}.db'.\n"
+                        f"  Command line: {self.server_port}\n"
+                        f"  Project file: {row[2]}\n"
+                        f"Either use the correct port or delete '{self.project_name}.db' to start fresh."
+                    )
                 if self.proxy_port != int(row[2]):
                     self.logger.warn("Proxy port from project ({}) "
                                   "overiding proxy port argument ({}) ".format(
@@ -780,7 +798,7 @@ class hack3270:
         Connects to a TN3270 server on server_ip, server_port
         '''
         if self.offline_mode:
-            raise Exception("Cannot connect when in Offline Mode")
+            raise Hack3270Error("Cannot connect when in Offline Mode")
         
         self.logger.debug("Connecting to {}:{}".format(
             self.server_ip,self.server_port))
@@ -795,7 +813,27 @@ class hack3270:
         else:
             self.server = server_sock
 
-        self.server.connect((self.server_ip, self.server_port))
+        try:
+            self.server.connect((self.server_ip, self.server_port))
+        except ConnectionRefusedError:
+            raise ConnectionError(
+                f"Connection refused by {self.server_ip}:{self.server_port}.\n"
+                f"Make sure the TN3270 server is running and accessible."
+            )
+        except socket.timeout:
+            raise ConnectionError(
+                f"Connection timed out to {self.server_ip}:{self.server_port}.\n"
+                f"Check network connectivity and firewall settings."
+            )
+        except socket.gaierror as e:
+            raise ConnectionError(
+                f"Cannot resolve hostname '{self.server_ip}': {e}"
+            )
+        except OSError as e:
+            raise ConnectionError(
+                f"Network error connecting to {self.server_ip}:{self.server_port}: {e}"
+            )
+        
         self.logger.debug("Connected to {}:{}".format(
             self.server_ip,self.server_port))
 
