@@ -902,6 +902,9 @@ class Hack3270GUI(QMainWindow):
         self.analysis_tree.setAlternatingRowColors(True)
         self.analysis_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.analysis_tree.header().setSectionResizeMode(5, QHeaderView.Stretch)
+        # Center align Req and Resp header labels
+        self.analysis_tree.headerItem().setTextAlignment(1, Qt.AlignCenter)
+        self.analysis_tree.headerItem().setTextAlignment(2, Qt.AlignCenter)
         self.analysis_tree.itemSelectionChanged.connect(self.analysis_item_selected)
         layout.addWidget(self.analysis_tree, 1)
         
