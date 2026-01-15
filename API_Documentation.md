@@ -474,7 +474,7 @@ Automate brute-force attacks on input fields.
 
 ### `get_inject_template(log_id, mask='*')`
 
-Get injection template from a captured packet.
+Get injection template from a captured packet. Uses the **local database** loaded via `load_db()`.
 
 First, capture a packet with mask characters in the target field:
 1. In the terminal, type `****` in the field you want to inject
@@ -482,6 +482,9 @@ First, capture a packet with mask characters in the target field:
 3. Note the log ID from the Logs tab
 
 ```python
+# Load the database containing your captured packet
+api.load_db('my_session.db')
+
 # Get template from log ID 42 (where you typed '****')
 template = api.get_inject_template(42, '*')
 
@@ -490,6 +493,8 @@ if template['status'] == 'ok':
     print(f"Preamble: {len(template['preamble'])} bytes")
     print(f"Postamble: {len(template['postamble'])} bytes")
 ```
+
+**Note:** You must call `load_db()` before using this function. The template is extracted from your local `.db` file, not the server's active session.
 
 **Returns:** `dict` with `preamble`, `postamble`, `mask_length`
 
