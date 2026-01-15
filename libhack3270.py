@@ -7,7 +7,7 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '2.3.2'
+__version__ = '2.4.1'
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 __name__ = "hack3270"
@@ -237,7 +237,12 @@ class hack3270:
         self.aid_fuzzer_stopped = False
         self.aid_fuzzer_captured_data = None
         self.aid_fuzzer_progress = 0
-        self.aid_fuzzer_callback = None  # GUI callback for status updates 
+        self.aid_fuzzer_callback = None  # GUI callback for status updates
+
+        # Web API State
+        self.api_port = 31337
+        self.api_listener = None
+        self.api_clients = []  # List of connected API client sockets 
 
         # Create the Loggers (file and stderr)
         self.logger = logging.getLogger(__name__)
@@ -276,6 +281,8 @@ class hack3270:
         self.logger.debug("Shutting Down server connection")
         if self.server:
             self.server.close()
+        self.logger.debug("Shutting Down API listener")
+        self.api_stop()
 
     def db_init(self):
         '''
@@ -837,6 +844,441 @@ class hack3270:
         self.logger.debug("Connected to {}:{}".format(
             self.server_ip,self.server_port))
 
+    def api_start(self):
+        '''
+        Creates the Web API TCP listener on port 31337.
+        This is a non-blocking listener that will be handled in the daemon() select loop.
+        '''
+        self.logger.debug(f"Starting Web API listener on port {self.api_port}")
+        
+        self.api_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.api_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.api_listener.setblocking(False)
+        
+        try:
+            self.api_listener.bind(('127.0.0.1', self.api_port))
+            self.api_listener.listen(5)
+            self.logger.info(f"Web API listening on port {self.api_port}")
+        except OSError as e:
+            self.logger.error(f"Failed to start Web API on port {self.api_port}: {e}")
+            self.api_listener = None
+            raise ConnectionError(f"Failed to start Web API on port {self.api_port}: {e}")
+
+    def api_stop(self):
+        '''
+        Stops the Web API listener and closes all API client connections.
+        '''
+        self.logger.debug("Stopping Web API listener")
+        
+        # Close all API client connections
+        for client in self.api_clients:
+            try:
+                client.close()
+            except:
+                pass
+        self.api_clients = []
+        
+        # Close the listener
+        if self.api_listener:
+            try:
+                self.api_listener.close()
+            except:
+                pass
+            self.api_listener = None
+        
+        self.logger.debug("Web API stopped")
+
+    def handle_api_request(self, client_socket, data):
+        '''
+        Handles incoming API requests from connected clients.
+        
+        Supported commands:
+            - SEND_RAW:<length>\n<binary_data> - Send raw bytes to the server
+            - ping - Test connectivity
+            - Other commands return placeholder response
+        '''
+        self.logger.debug(f"API request received: {len(data)} bytes")
+        
+        try:
+            # Check for SEND_RAW command first (binary-safe check)
+            if data.startswith(b'SEND_RAW:'):
+                self._handle_api_send_raw(client_socket, data)
+                return
+            
+            # Try to decode as text command
+            try:
+                text_data = data.decode('utf-8')
+            except UnicodeDecodeError:
+                text_data = None
+            
+            if text_data:
+                cmd = text_data.strip().lower()
+                
+                # Handle ping
+                if cmd == 'ping':
+                    client_socket.send(b"pong\n")
+                    return
+                
+                # Handle GET_LAST_SERVER - returns last server response as ASCII
+                if cmd == 'get_last_server':
+                    self._handle_api_get_last_server(client_socket)
+                    return
+                
+                # Handle GET_LAST_SERVER_RAW - returns last server response as base64
+                if cmd == 'get_last_server_raw':
+                    self._handle_api_get_last_server_raw(client_socket)
+                    return
+                
+                # Handle SEND_AID:<aid_name_or_hex> - send an AID key
+                if cmd.startswith('send_aid:'):
+                    aid_value = text_data.strip()[9:]  # Get original case after "SEND_AID:"
+                    self._handle_api_send_aid(client_socket, aid_value)
+                    return
+                
+                # Handle ANALYZE_HIDDEN - analyze last server response for hidden fields
+                if cmd == 'analyze_hidden':
+                    self._handle_api_analyze_hidden(client_socket)
+                    return
+                
+                # Handle GET_INJECT_TEMPLATE:<id>:<mask_char> - get preamble/postamble for injection
+                if cmd.startswith('get_inject_template:'):
+                    parts = text_data.strip()[20:].split(':')
+                    if len(parts) >= 2:
+                        log_id = parts[0]
+                        mask_char = parts[1]
+                        self._handle_api_get_inject_template(client_socket, log_id, mask_char)
+                    else:
+                        client_socket.send(b'{"status": "error", "message": "Usage: GET_INJECT_TEMPLATE:<id>:<mask_char>"}\n')
+                    return
+            
+            # Default response
+            response = f"hack3270 API - Received {len(data)} bytes\n"
+            client_socket.send(response.encode('utf-8'))
+            
+        except Exception as e:
+            self.logger.error(f"Error handling API request: {e}")
+            try:
+                client_socket.send(f"ERROR: {e}\n".encode('utf-8'))
+            except:
+                pass
+    
+    def _handle_api_send_raw(self, client_socket, data):
+        '''
+        Handle SEND_RAW command - send raw bytes to the mainframe server.
+        Format: SEND_RAW:<length>\n<binary_data>
+        '''
+        try:
+            # Find the header end (first newline)
+            header_end = data.find(b'\n')
+            if header_end == -1:
+                client_socket.send(b"ERROR: Invalid SEND_RAW format\n")
+                return
+            
+            header = data[:header_end].decode('utf-8')
+            raw_data = data[header_end + 1:]
+            
+            # Parse expected length
+            try:
+                expected_len = int(header.split(':')[1])
+            except (IndexError, ValueError):
+                client_socket.send(b"ERROR: Invalid SEND_RAW header\n")
+                return
+            
+            # Verify we have all the data
+            if len(raw_data) != expected_len:
+                client_socket.send(f"ERROR: Expected {expected_len} bytes, got {len(raw_data)}\n".encode('utf-8'))
+                return
+            
+            # Send to the mainframe server
+            if self.server:
+                self.write_database_log('C', 'API: Replay client data', raw_data)
+                self.server.send(raw_data)
+                client_socket.send(f"OK: Sent {len(raw_data)} bytes to server\n".encode('utf-8'))
+                self.logger.debug(f"API: Sent {len(raw_data)} bytes to server")
+            else:
+                client_socket.send(b"ERROR: No server connection\n")
+                
+        except Exception as e:
+            self.logger.error(f"Error in SEND_RAW: {e}")
+            client_socket.send(f"ERROR: {e}\n".encode('utf-8'))
+    
+    def _handle_api_send_aid(self, client_socket, aid_value):
+        '''
+        Handle SEND_AID command - send an AID key to the server.
+        
+        Args:
+            aid_value: AID name (e.g., "ENTER", "PF1") or hex value (e.g., "0x7d", "7d")
+        '''
+        try:
+            aid_value = aid_value.strip()
+            
+            # Try to look up by name first
+            aid_upper = aid_value.upper()
+            if aid_upper in self.AIDS:
+                aid_byte = self.AIDS[aid_upper]
+                aid_name = aid_upper
+            else:
+                # Try to parse as hex
+                try:
+                    hex_str = aid_value.lower().replace('0x', '')
+                    aid_byte = bytes([int(hex_str, 16)])
+                    aid_name = f"0x{hex_str.upper()}"
+                except ValueError:
+                    client_socket.send(f"ERROR: Unknown AID '{aid_value}'\n".encode('utf-8'))
+                    return
+            
+            # Build AID packet: AID byte + end-of-record marker
+            aid_packet = aid_byte + b'\xff\xef'
+            
+            if self.server:
+                self.write_database_log('C', f'API: Send AID {aid_name}', aid_packet)
+                self.server.send(aid_packet)
+                client_socket.send(f"OK: Sent AID {aid_name}\n".encode('utf-8'))
+                self.logger.debug(f"API: Sent AID {aid_name}")
+            else:
+                client_socket.send(b"ERROR: No server connection\n")
+                
+        except Exception as e:
+            self.logger.error(f"Error in SEND_AID: {e}")
+            client_socket.send(f"ERROR: {e}\n".encode('utf-8'))
+    
+    def _handle_api_get_inject_template(self, client_socket, log_id, mask_char):
+        '''
+        Handle GET_INJECT_TEMPLATE command - get preamble and postamble for injection.
+        This matches how the GUI Inject Fields feature works.
+        
+        Returns base64-encoded preamble and postamble that can be used for injection.
+        '''
+        import json
+        import base64
+        
+        try:
+            log_id = int(log_id)
+            
+            # Get the log entry
+            self.sql_cur.execute(f"SELECT RAW_DATA, C_S FROM Logs WHERE ID = {log_id}")
+            result = self.sql_cur.fetchone()
+            
+            if not result:
+                client_socket.send(f'{{"status": "error", "message": "Log ID {log_id} not found"}}\n'.encode('utf-8'))
+                return
+            
+            raw_data = result[0]
+            direction = result[1]
+            
+            if direction != 'C':
+                client_socket.send(f'{{"status": "error", "message": "Log ID {log_id} is not client data"}}\n'.encode('utf-8'))
+                return
+            
+            # Convert ASCII mask char to EBCDIC
+            if mask_char in a2e:
+                ebcdic_mask = a2e[mask_char]
+            else:
+                client_socket.send(f'{{"status": "error", "message": "Cannot convert mask char to EBCDIC"}}\n'.encode('utf-8'))
+                return
+            
+            # Find the mask - same logic as capture_mask()
+            preamble_count = 0
+            mask_count = 0
+            
+            # Find where mask starts (preamble)
+            for x in range(len(raw_data)):
+                if raw_data[x] != ebcdic_mask:
+                    preamble_count += 1
+                else:
+                    break
+            
+            # Count mask length
+            for x in range(preamble_count, len(raw_data)):
+                if raw_data[x] == ebcdic_mask:
+                    mask_count += 1
+                else:
+                    break
+            
+            if mask_count == 0:
+                client_socket.send(f'{{"status": "error", "message": "Mask not found in data"}}\n'.encode('utf-8'))
+                return
+            
+            # Split into preamble and postamble
+            preamble = raw_data[:preamble_count]
+            postamble = raw_data[preamble_count + mask_count:]
+            
+            response = {
+                'status': 'ok',
+                'log_id': log_id,
+                'mask_char': mask_char,
+                'mask_length': mask_count,
+                'preamble_b64': base64.b64encode(preamble).decode('ascii'),
+                'postamble_b64': base64.b64encode(postamble).decode('ascii'),
+                'preamble_len': len(preamble),
+                'postamble_len': len(postamble)
+            }
+            
+            client_socket.send((json.dumps(response) + '\n').encode('utf-8'))
+            
+        except ValueError as e:
+            client_socket.send(f'{{"status": "error", "message": "Invalid log ID: {e}"}}\n'.encode('utf-8'))
+        except Exception as e:
+            self.logger.error(f"Error in GET_INJECT_TEMPLATE: {e}")
+            client_socket.send(f'{{"status": "error", "message": "{e}"}}\n'.encode('utf-8'))
+    
+    def _handle_api_analyze_hidden(self, client_socket):
+        '''
+        Handle ANALYZE_HIDDEN command - analyze last server response for hidden fields.
+        Returns JSON with found hidden fields and their values.
+        '''
+        import json
+        
+        try:
+            if not self.server_data or len(self.server_data) == 0:
+                client_socket.send(b'{"status": "ok", "hidden_fields": [], "message": "No server data"}\n')
+                return
+            
+            data = self.server_data
+            hidden_fields = []
+            x = 0
+            
+            while x < len(data) - 1:
+                # Start Field (SF) - 0x1D
+                if data[x] == 0x1d:
+                    if x + 1 < len(data):
+                        field_attr = data[x + 1]
+                        if self.check_hidden(field_attr):
+                            # Extract data after this field until next field marker
+                            field_data = self._extract_field_data(data, x + 2)
+                            hidden_fields.append({
+                                'type': 'SF',
+                                'position': x,
+                                'attribute': hex(field_attr),
+                                'data': field_data
+                            })
+                    x += 2
+                    continue
+                
+                # Start Field Extended (SFE) - 0x29
+                elif data[x] == 0x29:
+                    if x + 1 < len(data):
+                        pair_count = data[x + 1]
+                        # Check each attribute pair for hidden bit
+                        for y in range(pair_count):
+                            pair_offset = x + 2 + (y * 2)
+                            if pair_offset + 1 < len(data):
+                                attr_type = data[pair_offset]
+                                attr_value = data[pair_offset + 1]
+                                # 0xC0 is Basic Field Attribute
+                                if attr_type == 0xc0 and self.check_hidden(attr_value):
+                                    # Extract data after this SFE
+                                    data_start = x + 2 + (pair_count * 2)
+                                    field_data = self._extract_field_data(data, data_start)
+                                    hidden_fields.append({
+                                        'type': 'SFE',
+                                        'position': x,
+                                        'attribute': hex(attr_value),
+                                        'data': field_data
+                                    })
+                                    break
+                        x += 2 + (pair_count * 2)
+                    else:
+                        x += 1
+                    continue
+                
+                # Modify Field (MF) - 0x2C
+                elif data[x] == 0x2c:
+                    if x + 1 < len(data):
+                        pair_count = data[x + 1]
+                        for y in range(pair_count):
+                            pair_offset = x + 2 + (y * 2)
+                            if pair_offset + 1 < len(data):
+                                attr_type = data[pair_offset]
+                                attr_value = data[pair_offset + 1]
+                                if attr_type == 0xc0 and self.check_hidden(attr_value):
+                                    data_start = x + 2 + (pair_count * 2)
+                                    field_data = self._extract_field_data(data, data_start)
+                                    hidden_fields.append({
+                                        'type': 'MF',
+                                        'position': x,
+                                        'attribute': hex(attr_value),
+                                        'data': field_data
+                                    })
+                                    break
+                        x += 2 + (pair_count * 2)
+                    else:
+                        x += 1
+                    continue
+                
+                x += 1
+            
+            response = {
+                'status': 'ok',
+                'total_bytes': len(data),
+                'hidden_count': len(hidden_fields),
+                'hidden_fields': hidden_fields
+            }
+            client_socket.send((json.dumps(response) + '\n').encode('utf-8'))
+            
+        except Exception as e:
+            self.logger.error(f"Error in ANALYZE_HIDDEN: {e}")
+            client_socket.send(f'{{"status": "error", "message": "{e}"}}\n'.encode('utf-8'))
+    
+    def _extract_field_data(self, data, start_pos):
+        '''
+        Extract field data from start_pos until next field marker or end.
+        Returns ASCII-converted string.
+        '''
+        field_bytes = []
+        x = start_pos
+        
+        # Field markers that end a field
+        field_markers = [0x1d, 0x29, 0x2c, 0x11, 0x13, 0xff]
+        
+        while x < len(data):
+            if data[x] in field_markers:
+                break
+            field_bytes.append(data[x])
+            x += 1
+        
+        if field_bytes:
+            # Convert EBCDIC to ASCII
+            return self.get_ascii(bytes(field_bytes))
+        return ''
+    
+    def _handle_api_get_last_server(self, client_socket):
+        '''
+        Handle GET_LAST_SERVER command - returns last server response converted to ASCII.
+        '''
+        try:
+            if self.server_data and len(self.server_data) > 0:
+                # Convert EBCDIC to ASCII
+                ascii_text = self.get_ascii(self.server_data)
+                response = f"OK:{len(self.server_data)}:{ascii_text}\n"
+            else:
+                response = "OK:0:\n"
+            client_socket.send(response.encode('utf-8', errors='replace'))
+        except Exception as e:
+            self.logger.error(f"Error in GET_LAST_SERVER: {e}")
+            client_socket.send(f"ERROR: {e}\n".encode('utf-8'))
+    
+    def _handle_api_get_last_server_raw(self, client_socket):
+        '''
+        Handle GET_LAST_SERVER_RAW command - returns last server response as base64.
+        '''
+        import json
+        import base64
+        try:
+            if self.server_data and len(self.server_data) > 0:
+                data_b64 = base64.b64encode(self.server_data).decode('ascii')
+                response = {
+                    'status': 'ok',
+                    'length': len(self.server_data),
+                    'data_b64': data_b64
+                }
+            else:
+                response = {'status': 'ok', 'length': 0, 'data_b64': ''}
+            client_socket.send((json.dumps(response) + '\n').encode('utf-8'))
+        except Exception as e:
+            self.logger.error(f"Error in GET_LAST_SERVER_RAW: {e}")
+            client_socket.send(f'{{"status": "error", "message": "{e}"}}\n'.encode('utf-8'))
+    
     def handle_server(self,server_data):
         log_line = ''
         if len(server_data) > 0:
@@ -869,8 +1311,49 @@ class hack3270:
 
     def daemon(self):
 
+        # Build the list of sockets to monitor
+        read_sockets = [self.client, self.server]
+        
+        # Add API listener if active
+        if self.api_listener:
+            read_sockets.append(self.api_listener)
+        
+        # Add all connected API clients
+        read_sockets.extend(self.api_clients)
+
         # Tend to client sending data
-        rlist, w, e = select.select([self.client, self.server], [], [], 0)
+        rlist, w, e = select.select(read_sockets, [], [], 0)
+        
+        # Handle new API connections
+        if self.api_listener and self.api_listener in rlist:
+            try:
+                api_client, addr = self.api_listener.accept()
+                api_client.setblocking(False)
+                self.api_clients.append(api_client)
+                self.logger.debug(f"API client connected from {addr}")
+            except Exception as e:
+                self.logger.error(f"Error accepting API connection: {e}")
+        
+        # Handle API client data
+        for api_client in self.api_clients[:]:  # Use slice copy to allow removal during iteration
+            if api_client in rlist:
+                try:
+                    data = api_client.recv(BUFFER_MAX)
+                    if len(data) > 0:
+                        self.handle_api_request(api_client, data)
+                    else:
+                        # Client disconnected
+                        self.logger.debug("API client disconnected")
+                        self.api_clients.remove(api_client)
+                        api_client.close()
+                except Exception as e:
+                    self.logger.error(f"Error handling API client: {e}")
+                    self.api_clients.remove(api_client)
+                    try:
+                        api_client.close()
+                    except:
+                        pass
+
         if self.client in rlist:
 
             self.logger.debug("Client Data Detected")

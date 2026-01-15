@@ -2,6 +2,47 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.4.1 Changelog
+
+### Offline Mode Fix
+- Web API no longer starts in offline mode (`-o` flag)
+- Prevents unnecessary port binding when replaying sessions
+
+### Security Fix
+- Web API now binds to `127.0.0.1` (localhost) only
+- Prevents remote access to the API port (31337)
+
+---
+
+## Version 2.4.0 Changelog
+
+### New Feature: Web API for Automation
+
+Added a **TCP Web API** on port 31337 for scripting and automation of penetration tests.
+
+#### Python Client Library (`hack3270_api.py`)
+- Full-featured client library for API interaction
+- Direct SQLite3 database access for session replay
+- Context manager support for clean resource handling
+
+#### API Capabilities
+- **Connection Management**: `connect()`, `disconnect()`, `is_connected()`, `reconnect()`
+- **Response Handling**: `get_last_server()`, `get_last_server_raw()`, `wait_for(pattern)`, `wait_for_change()`
+- **Screen Analysis**: `get_screen_text()`, `find_text()`, `find_field()`, `get_text_at()`
+- **Data Conversion**: `ascii_to_ebcdic()`, `ebcdic_to_ascii()`
+- **AID Keys**: `send_aid()` - send ENTER, PF1-24, PA1-3, CLEAR, etc.
+- **Raw Data**: `send_raw()`, `send_client_data()`
+- **Field Injection**: `get_inject_template()`, `inject()`, `load_injection_file()`
+- **Hidden Fields**: `analyze_hidden()` - detect data in hidden fields
+- **Automation**: `replay_sequence()`, `record_start()`, `record_stop()`, `playback()`
+
+#### Documentation
+- Full API documentation in `API_Documentation.md`
+- Example code for all methods
+- Step-by-step automation tutorials
+
+---
+
 ## Version 2.3.2 Changelog
 
 ### Analysis Tab Export

@@ -2024,6 +2024,10 @@ class tkhack3270:
                 hack3270.play_record(my_record_num)
                 my_record_num += 1
         
+        # Start the Web API listener (not in offline mode)
+        if not hack3270.is_offline():
+            hack3270.api_start()
+        
         self.window = Hack3270GUI(hack3270, logfile, loglevel)
         self.window.show()
         self.app.exec()
