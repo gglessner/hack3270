@@ -2,6 +2,18 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.4.2 Changelog
+
+### API Client Library Fix
+- Fixed `get_inject_template()` to use local database instead of server's database
+- Injection scripts now work with custom `.db` files (e.g., `dvca-brute.db`)
+
+### Code Organization
+- Moved all API example scripts to `API-DVCA-Code/` directory
+- Added `API-Examples.md` with step-by-step DVCA demo instructions
+
+---
+
 ## Version 2.4.1 Changelog
 
 ### Offline Mode Fix

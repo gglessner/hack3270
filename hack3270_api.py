@@ -439,17 +439,49 @@ class Hack3270API:
     def get_inject_template(self, log_id, mask='*'):
         """
         Get preamble/postamble from a captured packet for injection.
+        Uses LOCAL database (not server's database).
         Returns dict with 'preamble' and 'postamble' as bytes, plus 'mask_length'.
         """
-        self._send(f'GET_INJECT_TEMPLATE:{log_id}:{mask}\n')
-        try:
-            result = json.loads(self._recv())
-            if result.get('status') == 'ok':
-                result['preamble'] = base64.b64decode(result['preamble_b64'])
-                result['postamble'] = base64.b64decode(result['postamble_b64'])
-            return result
-        except json.JSONDecodeError as e:
-            raise Hack3270APIError(f"Invalid response: {e}")
+        # Get raw data from local database
+        raw_data = self.db_get_raw(log_id)
+        if raw_data is None:
+            return {'status': 'error', 'message': f'Log ID {log_id} not found'}
+        
+        # Convert ASCII mask to EBCDIC
+        ebcdic_mask = self.A2E.get(mask)
+        if ebcdic_mask is None:
+            return {'status': 'error', 'message': f'Cannot convert mask char to EBCDIC'}
+        
+        # Find preamble (before mask)
+        preamble_count = 0
+        for x in range(len(raw_data)):
+            if raw_data[x] != ebcdic_mask:
+                preamble_count += 1
+            else:
+                break
+        
+        # Count mask length
+        mask_count = 0
+        for x in range(preamble_count, len(raw_data)):
+            if raw_data[x] == ebcdic_mask:
+                mask_count += 1
+            else:
+                break
+        
+        if mask_count == 0:
+            return {'status': 'error', 'message': 'Mask not found in data'}
+        
+        # Split into preamble and postamble
+        preamble = raw_data[:preamble_count]
+        postamble = raw_data[preamble_count + mask_count:]
+        
+        return {
+            'status': 'ok',
+            'log_id': log_id,
+            'mask_length': mask_count,
+            'preamble': preamble,
+            'postamble': postamble
+        }
     
     def load_injection_file(self, filename):
         """Load injection values from file (one per line)."""

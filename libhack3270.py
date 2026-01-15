@@ -7,7 +7,7 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '2.4.1'
+__version__ = '2.4.2'
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 __name__ = "hack3270"
