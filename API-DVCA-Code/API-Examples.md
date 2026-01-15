@@ -1,6 +1,6 @@
 # DVCA API Examples
 
-This directory contains example scripts demonstrating the hack3270 Web API against the DVCA (Damn Vulnerable COBOL Application) mainframe.
+This directory contains example scripts demonstrating the hack3270 Web API against the DVCA (Damn Vulnerable CICS Application) mainframe.
 
 ## Prerequisites
 
