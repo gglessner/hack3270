@@ -169,7 +169,6 @@ Each script may use its own `.db` file to store captured traffic:
 | Script | Database |
 |--------|----------|
 | `login.py` | `dvca-login.db` |
-| `login-reconnect.py` | `dvca-reconnect.db` |
 | `brute.py` | `dvca-brute.db` |
 
 These contain pre-captured packets for replaying login sequences and injection templates.
@@ -181,7 +180,6 @@ These contain pre-captured packets for replaying login sequences and injection t
 | Script | Purpose |
 |--------|---------|
 | `login.py` | Automated login to MCGM menu |
-| `login-reconnect.py` | Login with session reconnect handling |
 | `check_hidden.py` | Detect hidden field data |
 | `aid_scan.py` | Find hidden screens via AID scanning |
 | `brute.py` | Brute force supervisor code |
@@ -194,6 +192,6 @@ These contain pre-captured packets for replaying login sequences and injection t
 
 **"Mask not found"** - The template log ID doesn't contain the mask character. Recapture while on the correct screen.
 
-**"USERID DVCA IN USE"** - Use `login-reconnect.py` instead, or restart the DVCA container.
+**"USERID DVCA IN USE"** - Restart the DVCA container for a fresh session.
 
 **Scripts not finding library** - Run from the `API-DVCA-Code` directory, not the parent.
