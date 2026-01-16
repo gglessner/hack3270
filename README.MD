@@ -2,6 +2,30 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.4.3 Changelog
+
+### New API Functions
+- Added `send_field()` - send text to a specific field with automatic EBCDIC conversion
+- Added `send_command()` - send commands on unformatted screens
+
+### New Scripts (No Database Required)
+- `login2.py` - Login using raw packet construction (no .db file)
+- `login3.py` - Login with automatic reconnect handling for "USERID IN USE" scenarios
+- `brute2.py` - Brute force using raw packets with form data defined in ASCII
+
+### Documentation
+- Created in-depth tutorials for all scripts:
+  - `login.md`, `login2.md`, `login3.md`
+  - `check_hidden.md`, `aid_scan.md`
+  - `brute.md`, `brute2.md`
+- Updated `API-Examples.md` with all new scripts
+- Updated `API_Documentation.md` with new functions
+
+### Cleanup
+- Removed redundant scripts (`inject_loop.py`, `login-reconnect.py`)
+
+---
+
 ## Version 2.4.2 Changelog
 
 ### API Client Library Fix
