@@ -253,6 +253,51 @@ class Hack3270API:
             self._recorded.append(('RAW', data))
         return resp
     
+    def send_field(self, text, cursor_addr, field_addr, add_space=False):
+        """
+        Send text to a specific field on a formatted screen.
+        
+        Args:
+            text: ASCII text to send (will be converted to EBCDIC)
+            cursor_addr: 2-byte cursor address (from captured packet)
+            field_addr: 2-byte field address (from captured packet)
+            add_space: Add trailing space after text
+            
+        Returns:
+            API response string
+        """
+        AID_ENTER = 0x7D
+        SBA = 0x11
+        IAC_EOR = bytes([0xFF, 0xEF])
+        
+        ebcdic_text = self.ascii_to_ebcdic(text)
+        if add_space:
+            ebcdic_text += self.ascii_to_ebcdic(' ')
+        
+        packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
+        return self.send_raw(packet)
+    
+    def send_command(self, text, cursor_addr=None):
+        """
+        Send a command on an unformatted screen (e.g., transaction codes).
+        
+        Args:
+            text: ASCII command text (will be converted to EBCDIC)
+            cursor_addr: Optional 2-byte cursor address (default: 0x40, 0xC4)
+            
+        Returns:
+            API response string
+        """
+        AID_ENTER = 0x7D
+        IAC_EOR = bytes([0xFF, 0xEF])
+        
+        if cursor_addr is None:
+            cursor_addr = bytes([0x40, 0xC4])
+        
+        ebcdic_text = self.ascii_to_ebcdic(text)
+        packet = bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
+        return self.send_raw(packet)
+    
     def send_client_data(self, log_id):
         """Replay client data from a log entry."""
         raw = self.db_get_raw(log_id)

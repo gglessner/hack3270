@@ -333,6 +333,45 @@ api.send_raw(raw_data)
 
 **Returns:** `str` - API response
 
+### `send_field(text, cursor_addr, field_addr, add_space=False)`
+
+Send text to a specific field on a formatted screen. Automatically converts ASCII to EBCDIC and builds the TN3270 packet.
+
+```python
+# Screen positions from captured packets
+USERNAME_CURSOR = bytes([0x5B, 0xF4])
+USERNAME_FIELD = bytes([0x5B, 0xF0])
+
+# Send username to field
+api.send_field('DVCA', USERNAME_CURSOR, USERNAME_FIELD, add_space=True)
+```
+
+**Parameters:**
+- `text` - ASCII text to send (converted to EBCDIC)
+- `cursor_addr` - 2-byte cursor address (from captured packet)
+- `field_addr` - 2-byte field address (from captured packet)
+- `add_space` - Add trailing space after text (default: False)
+
+**Returns:** `str` - API response
+
+### `send_command(text, cursor_addr=None)`
+
+Send a command on an unformatted screen (e.g., transaction codes like CICS transactions).
+
+```python
+# Send MCGM transaction
+api.send_command('MCGM')
+
+# With custom cursor position
+api.send_command('CESF LOGOFF', cursor_addr=bytes([0x40, 0xC4]))
+```
+
+**Parameters:**
+- `text` - ASCII command text (converted to EBCDIC)
+- `cursor_addr` - Optional 2-byte cursor address (default: 0x40, 0xC4)
+
+**Returns:** `str` - API response
+
 ### `send_client_data(log_id)`
 
 Replay client data from a database log entry.

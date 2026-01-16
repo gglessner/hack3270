@@ -43,27 +43,70 @@ You should see the DVCA splash screen.
 
 Run all scripts from the `API-DVCA-Code` directory.
 
-### Step 1: Login (`login.py`)
+### Step 1: Login
 
-Automates the login sequence and navigates to the MCGM main menu.
+Three login scripts are provided, each demonstrating different approaches:
+
+#### `login.py` - Database Replay
+
+Replays pre-captured packets from `dvca-login.db`. Simple but requires the database file.
 
 ```bash
 cd API-DVCA-Code
 python login.py
 ```
 
-**Expected output:**
-```
-DVCA Login Script
-==================================================
-Connecting...
-Handling initial screen...
-Logging in...
-Navigating to MCGM menu...
-Login complete! At Options menu.
+#### `login2.py` - Raw Packet Construction (No Database)
+
+Builds TN3270 packets programmatically using `send_field()` and `send_command()`. No database required - credentials are defined as ASCII strings converted to EBCDIC at runtime.
+
+```python
+USERNAME = 'DVCA'
+PASSWORD = 'DVCA'
+TRANSACTION = 'MCGM'
 ```
 
-Your terminal should now display the MCGM Options menu.
+```bash
+python login2.py
+```
+
+**Key difference:** Uses `api.send_field()` and `api.send_command()` instead of `api.send_client_data()`.
+
+#### `login3.py` - Raw Packets + Reconnect Handling
+
+Same as `login2.py` but handles the "USERID ALREADY LOGGED ON" scenario by sending:
+
+```
+LOGON DVCA RECONNECT
+```
+
+Then continues with password entry and normal flow.
+
+```bash
+python login3.py
+```
+
+**Expected output (reconnect case):**
+```
+Sending username: DVCA
+User already logged on - attempting reconnect...
+Reconnect accepted, at password prompt
+Sending password: DVCA
+  Sending ENTER...
+  Found *** prompt, sending CLEAR...
+Sending transaction: MCGM
+Sending PF5...
+
+==================================================
+SUCCESS: At MCGM Options menu!
+==================================================
+```
+
+| Script | Database Required | Reconnect Handling |
+|--------|-------------------|-------------------|
+| `login.py` | Yes (`dvca-login.db`) | No |
+| `login2.py` | No | No |
+| `login3.py` | No | Yes |
 
 ---
 
@@ -124,31 +167,46 @@ You'll discover additional hidden functionality!
 
 ---
 
-### Step 4: Brute Force Supervisor Code (`brute.py`)
+### Step 4: Brute Force Supervisor Code
 
-First, set up the correct application state:
+Two brute force scripts are provided:
 
-1. Exit the hidden screen (press PF3 or navigate back to Options menu)
-2. Select **Option 2** - "Update Shipping Address"
-3. Enter any invalid supervisor code (e.g., `0000`) to get to the code entry screen
-4. **Capture the screen** in hack3270 - note the log ID with `****` mask
+#### `brute.py` - Database Template
 
-Then update `brute.py` if needed:
-- Set `DB_FILE` to your database file
-- Set `TEMPLATE_ID` to the log ID containing the `****` mask
-
-Run the brute force:
+Uses a captured packet from `dvca-brute.db` as a template. Requires capturing a screen with `****` mask.
 
 ```bash
 python brute.py
 ```
 
+#### `brute2.py` - Raw Packets (No Database)
+
+Builds TN3270 packets programmatically with all form data defined in ASCII:
+
+```python
+FORM_FIELDS = [
+    (bytes([0xC6, 0xE7]), 'Phillip Young', 44),
+    (bytes([0xC9, 0xC7]), '101 Adelaide St W', 44),
+    (bytes([0x4B, 0xE7]), 'Toronto', 44),
+    (bytes([0x4E, 0xC7]), 'Ontario', 44),
+    (bytes([0x50, 0xE7]), 'M5H 0B3', 44),
+    (bytes([0xD3, 0xC7]), 'Canada', 44),
+]
+```
+
+No database required - all data converted from ASCII to EBCDIC at runtime.
+
+```bash
+python brute2.py
+```
+
 **Expected output:**
 ```
-Supervisor Code Brute Force
+Supervisor Code Brute Force (Raw Packets)
 ==================================================
-Mask: 4 chars
-Trying 50 codes...
+Connected!
+
+Loaded 50 codes to try
 
 [10/50]
 [20/50]
@@ -157,6 +215,11 @@ Trying 50 codes...
 
 *** FOUND: 1337 ***
 ```
+
+| Script | Database Required | Form Data |
+|--------|-------------------|-----------|
+| `brute.py` | Yes (`dvca-brute.db`) | From captured packet |
+| `brute2.py` | No | Hardcoded in ASCII |
 
 The supervisor code is **1337**.
 
@@ -179,10 +242,13 @@ These contain pre-captured packets for replaying login sequences and injection t
 
 | Script | Purpose |
 |--------|---------|
-| `login.py` | Automated login to MCGM menu |
+| `login.py` | Automated login (database replay) |
+| `login2.py` | Automated login (raw packets, no database) |
+| `login3.py` | Automated login with reconnect handling |
 | `check_hidden.py` | Detect hidden field data |
 | `aid_scan.py` | Find hidden screens via AID scanning |
-| `brute.py` | Brute force supervisor code |
+| `brute.py` | Brute force supervisor code (database template) |
+| `brute2.py` | Brute force supervisor code (raw packets) |
 
 ---
 
@@ -192,6 +258,6 @@ These contain pre-captured packets for replaying login sequences and injection t
 
 **"Mask not found"** - The template log ID doesn't contain the mask character. Recapture while on the correct screen.
 
-**"USERID DVCA IN USE"** - Restart the DVCA container for a fresh session.
+**"USERID DVCA IN USE"** - Use `login3.py` which handles reconnection, or restart the DVCA container for a fresh session.
 
 **Scripts not finding library** - Run from the `API-DVCA-Code` directory, not the parent.
