@@ -2,6 +2,21 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.4.4 Changelog
+
+### TN3270E Protocol Fixes
+- Fixed AID handling for TN3270E mode (IBM mainframes vs TK4)
+- API functions now correctly prepend 5-byte TN3270E header when required
+- Added `is_tn3270e()` API function to query proxy mode
+
+#### Functions Updated
+- `send_aid()` - now adds TN3270E header automatically
+- `send_field()` - now adds TN3270E header automatically  
+- `send_command()` - now adds TN3270E header automatically
+- AID Fuzzer and AID Spoofing - fixed byte position for TN3270E
+
+---
+
 ## Version 2.4.3 Changelog
 
 ### New API Functions
@@ -62,7 +77,7 @@ Added a **TCP Web API** on port 31337 for scripting and automation of penetratio
 - Context manager support for clean resource handling
 
 #### API Capabilities
-- **Connection Management**: `connect()`, `disconnect()`, `is_connected()`, `reconnect()`
+- **Connection Management**: `connect()`, `disconnect()`, `is_connected()`, `reconnect()`, `is_tn3270e()`
 - **Response Handling**: `get_last_server()`, `get_last_server_raw()`, `wait_for(pattern)`, `wait_for_change()`
 - **Screen Analysis**: `get_screen_text()`, `find_text()`, `find_field()`, `get_text_at()`
 - **Data Conversion**: `ascii_to_ebcdic()`, `ebcdic_to_ascii()`

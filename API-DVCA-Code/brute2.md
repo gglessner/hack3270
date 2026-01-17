@@ -54,7 +54,11 @@ Each field has:
 
 ```python
 def build_code_packet(api, code):
-    packet = bytes([AID_ENTER]) + CURSOR_ADDR
+    # Start with TN3270E header if needed
+    if api.is_tn3270e():
+        packet = bytes([0x00, 0x00, 0x00, 0x00, 0x01, AID_ENTER]) + CURSOR_ADDR
+    else:
+        packet = bytes([AID_ENTER]) + CURSOR_ADDR
     
     # Add all address fields
     for field_addr, text, length in FORM_FIELDS:
@@ -73,10 +77,13 @@ def build_code_packet(api, code):
 ```
 
 This function:
-1. Starts with AID (ENTER) and cursor position
-2. Adds each form field: SBA + address + EBCDIC data
-3. Adds the brute-forced code field
-4. Ends with IAC EOR
+1. Checks if TN3270E mode (IBM mainframe) and adds 5-byte header if needed
+2. Starts with AID (ENTER) and cursor position
+3. Adds each form field: SBA + address + EBCDIC data
+4. Adds the brute-forced code field
+5. Ends with IAC EOR
+
+**Note:** The TN3270E header (`00 00 00 00 01`) is required for IBM mainframes but not for TK4. The `api.is_tn3270e()` function queries the proxy to determine the correct mode.
 
 ### Padding Fields
 

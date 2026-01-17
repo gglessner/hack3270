@@ -131,6 +131,21 @@ Disconnect and reconnect to the API.
 api.reconnect()
 ```
 
+### `is_tn3270e()`
+
+Check if the proxy is operating in TN3270E mode (IBM mainframe) vs plain TN3270 (TK4).
+
+```python
+if api.is_tn3270e():
+    print("TN3270E mode - IBM mainframe")
+else:
+    print("TN3270 mode - TK4 or similar")
+```
+
+**Returns:** `bool`
+
+**Note:** This method caches the result after the first call. The `send_aid()`, `send_field()`, and `send_command()` methods automatically use this to prepend the required 5-byte TN3270E header when needed.
+
 ### `ping()`
 
 Test API connectivity.

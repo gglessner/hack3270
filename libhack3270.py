@@ -7,7 +7,7 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '2.4.3'
+__version__ = '2.4.4'
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 __name__ = "hack3270"
@@ -929,6 +929,12 @@ class hack3270:
                     self._handle_api_get_last_server_raw(client_socket)
                     return
                 
+                # Handle IS_TN3270E - check if connection is TN3270E mode
+                if cmd == 'is_tn3270e':
+                    is_3270e = self.check_inject_3270e()
+                    client_socket.send(f"{'TRUE' if is_3270e else 'FALSE'}\n".encode('utf-8'))
+                    return
+                
                 # Handle SEND_AID:<aid_name_or_hex> - send an AID key
                 if cmd.startswith('send_aid:'):
                     aid_value = text_data.strip()[9:]  # Get original case after "SEND_AID:"
@@ -1027,14 +1033,20 @@ class hack3270:
                     client_socket.send(f"ERROR: Unknown AID '{aid_value}'\n".encode('utf-8'))
                     return
             
-            # Build AID packet: AID byte + end-of-record marker
-            aid_packet = aid_byte + b'\xff\xef'
-            
             if self.server:
+                # Check if TN3270E mode - add 5-byte header if so
+                if self.check_inject_3270e():
+                    # TN3270E: header (00 00 00 00 01) + AID + IAC EOR
+                    aid_packet = b'\x00\x00\x00\x00\x01' + aid_byte + b'\xff\xef'
+                    self.logger.debug(f"API: Sending AID as TN3270E: {aid_name}")
+                else:
+                    # Plain TN3270: AID + IAC EOR
+                    aid_packet = aid_byte + b'\xff\xef'
+                    self.logger.debug(f"API: Sending AID as TN3270: {aid_name}")
+                
                 self.write_database_log('C', f'API: Send AID {aid_name}', aid_packet)
                 self.server.send(aid_packet)
                 client_socket.send(f"OK: Sent AID {aid_name}\n".encode('utf-8'))
-                self.logger.debug(f"API: Sent AID {aid_name}")
             else:
                 client_socket.send(b"ERROR: No server connection\n")
                 
@@ -1565,19 +1577,34 @@ class hack3270:
         """
         Replace the AID byte in client data with the spoofed value.
         Returns the modified data.
+        
+        In TN3270E mode, AID is at byte 5 (after 5-byte header).
+        In plain TN3270 mode, AID is at byte 0.
         """
         if len(client_data) < 1:
             return client_data
         
-        original_aid = client_data[0:1]
-        original_aid_name = self.get_aid_name(original_aid)
-        
         # Get the spoofed AID byte
-        spoofed_aid = self.AIDS.get(self.aid_spoof_value, original_aid)
+        spoofed_aid = self.AIDS.get(self.aid_spoof_value, None)
         spoofed_aid_name = self.aid_spoof_value
         
-        # Replace first byte with spoofed AID
-        modified_data = spoofed_aid + client_data[1:]
+        # Determine AID position based on TN3270E mode
+        if self.check_inject_3270e():
+            # TN3270E: AID is at byte 5
+            if len(client_data) < 6:
+                return client_data, "?", spoofed_aid_name
+            original_aid = client_data[5:6]
+            original_aid_name = self.get_aid_name(original_aid)
+            if spoofed_aid is None:
+                spoofed_aid = original_aid
+            modified_data = client_data[:5] + spoofed_aid + client_data[6:]
+        else:
+            # Plain TN3270: AID is at byte 0
+            original_aid = client_data[0:1]
+            original_aid_name = self.get_aid_name(original_aid)
+            if spoofed_aid is None:
+                spoofed_aid = original_aid
+            modified_data = spoofed_aid + client_data[1:]
         
         self.logger.debug(f"AID Spoofed: {original_aid_name} -> {spoofed_aid_name}")
         return modified_data, original_aid_name, spoofed_aid_name
@@ -1611,7 +1638,16 @@ class hack3270:
         aid_name = self.get_aid_name(aid_byte)
         
         # Replace AID in captured data
-        fuzzed_data = aid_byte + self.aid_fuzzer_captured_data[1:]
+        # In TN3270E mode, AID is at byte 5 (after 5-byte header)
+        # In plain TN3270 mode, AID is at byte 0
+        if self.check_inject_3270e():
+            # TN3270E: header (5 bytes) + AID + data
+            # Replace byte at position 5
+            fuzzed_data = self.aid_fuzzer_captured_data[:5] + aid_byte + self.aid_fuzzer_captured_data[6:]
+        else:
+            # Plain TN3270: AID + data
+            # Replace byte at position 0
+            fuzzed_data = aid_byte + self.aid_fuzzer_captured_data[1:]
         
         # Log and send
         log_msg = f"AID Fuzz: {self.aid_fuzzer_progress}/255 (0x{self.aid_fuzzer_progress:02X} - {aid_name})"

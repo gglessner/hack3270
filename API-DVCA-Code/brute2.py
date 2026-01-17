@@ -47,8 +47,13 @@ def build_code_packet(api, code):
     Build a full TN3270 form submission packet with the supervisor code.
     
     Includes all address fields plus the 4-digit code.
+    Handles TN3270E mode automatically.
     """
-    packet = bytes([AID_ENTER]) + CURSOR_ADDR
+    # Start with TN3270E header if needed
+    if api.is_tn3270e():
+        packet = bytes([0x00, 0x00, 0x00, 0x00, 0x01, AID_ENTER]) + CURSOR_ADDR
+    else:
+        packet = bytes([AID_ENTER]) + CURSOR_ADDR
     
     # Add all address fields
     for field_addr, text, length in FORM_FIELDS:

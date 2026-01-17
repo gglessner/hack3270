@@ -64,6 +64,7 @@ class Hack3270API:
         self._cur = None
         self._recording = False
         self._recorded = []
+        self._is_tn3270e = None  # Cached TN3270E mode (None = not checked yet)
     
     def __enter__(self):
         self.connect()
@@ -244,6 +245,22 @@ class Hack3270API:
             self._recorded.append(('AID', aid))
         return resp
     
+    def is_tn3270e(self):
+        """
+        Check if the connection is in TN3270E mode.
+        
+        TN3270E (extended) mode requires a 5-byte header before the AID byte.
+        Plain TN3270 mode (used by TK4, etc.) does not.
+        
+        Returns:
+            True if TN3270E mode, False if plain TN3270
+        """
+        if self._is_tn3270e is None:
+            self._send('IS_TN3270E\n')
+            resp = self._recv().strip()
+            self._is_tn3270e = (resp == 'TRUE')
+        return self._is_tn3270e
+    
     def send_raw(self, data):
         """Send raw bytes to the server."""
         header = f"SEND_RAW:{len(data)}\n"
@@ -269,12 +286,17 @@ class Hack3270API:
         AID_ENTER = 0x7D
         SBA = 0x11
         IAC_EOR = bytes([0xFF, 0xEF])
+        TN3270E_HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x01])
         
         ebcdic_text = self.ascii_to_ebcdic(text)
         if add_space:
             ebcdic_text += self.ascii_to_ebcdic(' ')
         
-        packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
+        # Build packet with TN3270E header if needed
+        if self.is_tn3270e():
+            packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
+        else:
+            packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
         return self.send_raw(packet)
     
     def send_command(self, text, cursor_addr=None):
@@ -290,12 +312,18 @@ class Hack3270API:
         """
         AID_ENTER = 0x7D
         IAC_EOR = bytes([0xFF, 0xEF])
+        TN3270E_HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x01])
         
         if cursor_addr is None:
             cursor_addr = bytes([0x40, 0xC4])
         
         ebcdic_text = self.ascii_to_ebcdic(text)
-        packet = bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
+        
+        # Build packet with TN3270E header if needed
+        if self.is_tn3270e():
+            packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
+        else:
+            packet = bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
         return self.send_raw(packet)
     
     def send_client_data(self, log_id):
