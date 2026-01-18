@@ -2,6 +2,57 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.4.5 Changelog
+
+### New API Functions for Screen Parsing
+- `decode_buffer_address(b1, b2)` - Decode 12-bit/14-bit buffer addresses
+- `encode_buffer_address(addr)` - Encode position to 2-byte address
+- `parse_screen_fields()` - Parse 3270 data stream to discover all fields
+- `get_input_fields()` - Get editable (unprotected) fields
+- `get_protected_fields()` - Get read-only fields
+- `get_hidden_fields()` - Get hidden fields
+- `is_field_protected(attr)`, `is_field_numeric(attr)`, `is_field_hidden(attr)` - Attribute helpers
+- `check_abend()` - Detect mainframe abend/error patterns
+- `test_connection()` - Verify API is responsive
+- `build_raw_packet()` - Build TN3270 packets with proper headers
+
+### New API Constants
+- `ADDR_TABLE` - 12-bit address encoding table
+- `ORDERS` - TN3270 order byte reference (SBA, SF, SFE, etc.)
+- `WRITE_COMMANDS` - Write command reference
+- `ABEND_PATTERNS` - Mainframe error patterns
+
+### Fuzzing Scripts
+Added comprehensive fuzzing tools for mainframe penetration testing:
+
+- **`fuzz.py`** - CICS/COBOL-specific fuzzer with hardcoded fields
+  - Packed decimal (COMP-3) attacks
+  - Zoned decimal invalid data
+  - CICS command injection
+  - SQL/DB2 injection attempts
+  - TN3270 order injection
+
+- **`fuzz2.py`** - Dynamic field discovery fuzzer
+  - Automatically discovers input fields on current screen
+  - No field configuration required
+  - Uses API screen parsing functions
+
+- **`fuzz3.py`** - Protected & hidden field fuzzer
+  - Tests server-side validation of "read-only" data
+  - Detects if server trusts protected field data
+  - Corruption detection and auto-stop
+
+- **`order_fuzz.py`** - TN3270 protocol order injection
+  - Tests SBA, SF, SFE, RA, EUA order handling
+  - Telnet control sequence injection
+  - Protocol parsing vulnerability detection
+
+### Documentation
+- Created tutorials: `fuzz.md`, `fuzz2.md`, `fuzz3.md`, `order_fuzz.md`
+- Updated `API_Documentation.md` with new screen parsing functions
+
+---
+
 ## Version 2.4.4 Changelog
 
 ### TN3270E Protocol Fixes

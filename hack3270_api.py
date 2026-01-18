@@ -55,6 +55,48 @@ class Hack3270API:
     }
     E2A = {v: k for k, v in A2E.items()}  # Reverse mapping
     
+    # 12-bit buffer address encoding table
+    ADDR_TABLE = [
+        0x40, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
+        0xC8, 0xC9, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+        0x50, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7,
+        0xD8, 0xD9, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
+        0x60, 0x61, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7,
+        0xE8, 0xE9, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
+        0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7,
+        0xF8, 0xF9, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
+    ]
+    
+    # TN3270 Order bytes
+    ORDERS = {
+        0x05: 'PT',    # Program Tab
+        0x08: 'GE',    # Graphic Escape
+        0x11: 'SBA',   # Set Buffer Address
+        0x12: 'EUA',   # Erase Unprotected to Address
+        0x13: 'IC',    # Insert Cursor
+        0x1D: 'SF',    # Start Field
+        0x28: 'SA',    # Set Attribute
+        0x29: 'SFE',   # Start Field Extended
+        0x2C: 'MF',    # Modify Field
+        0x3C: 'RA',    # Repeat to Address
+    }
+    
+    # TN3270 Write Commands
+    WRITE_COMMANDS = {
+        0x01: 'Write',
+        0x05: 'Erase/Write',
+        0x0D: 'Erase/Write Alternate',
+        0x11: 'Erase All Unprotected',
+        0xF1: 'Write (SNA)',
+        0xF5: 'Erase/Write (SNA)',
+    }
+    
+    # Mainframe abend/error patterns
+    ABEND_PATTERNS = [
+        'DFHAC2', 'ABEND', 'ASRA', 'AICA', 'AEY7', 'APCT',
+        'SOC7', 'SOC4', 'S0C7', 'S0C4', 'ASRB', 'AEXL',
+    ]
+    
     def __init__(self, host=None, port=None, timeout=None):
         self.host = host or self.HOST
         self.port = port or self.PORT
@@ -647,6 +689,300 @@ class Hack3270API:
                 self.send_client_data(data)
             if delay > 0:
                 time.sleep(delay)
+    
+    # =========================================================================
+    # Buffer Address Utilities
+    # =========================================================================
+    
+    def decode_buffer_address(self, b1, b2):
+        """
+        Decode 12-bit or 14-bit buffer address from two bytes.
+        
+        Args:
+            b1, b2: Two address bytes
+            
+        Returns:
+            Integer buffer position (0-based)
+        """
+        if b1 & 0xC0 == 0x00:
+            # 14-bit addressing
+            return ((b1 & 0x3F) << 8) | b2
+        else:
+            # 12-bit addressing
+            try:
+                high = self.ADDR_TABLE.index(b1)
+                low = self.ADDR_TABLE.index(b2)
+                return (high << 6) | low
+            except ValueError:
+                return -1
+    
+    def encode_buffer_address(self, addr):
+        """
+        Encode buffer position to 12-bit address bytes.
+        
+        Args:
+            addr: Integer buffer position (0-based)
+            
+        Returns:
+            2-byte address
+        """
+        high = (addr >> 6) & 0x3F
+        low = addr & 0x3F
+        return bytes([self.ADDR_TABLE[high], self.ADDR_TABLE[low]])
+    
+    # =========================================================================
+    # Screen Parsing
+    # =========================================================================
+    
+    def parse_screen_fields(self, raw_data=None):
+        """
+        Parse 3270 data stream to find all fields.
+        
+        Args:
+            raw_data: Raw server data bytes. If None, uses last server response.
+            
+        Returns:
+            List of field dicts with keys:
+                - address: buffer position where field data starts
+                - protected: True if read-only
+                - numeric: True if numeric-only
+                - hidden: True if invisible
+                - length: field length in characters
+                - value: current EBCDIC content (bytes)
+        """
+        if raw_data is None:
+            raw_data = self.get_last_server_raw()
+        
+        if not raw_data:
+            return []
+        
+        fields = []
+        i = 0
+        screen_size = self.SCREEN_COLS * self.SCREEN_ROWS
+        
+        SBA = 0x11
+        SF = 0x1D
+        SFE = 0x29
+        
+        # Skip command bytes at start
+        if len(raw_data) > 0 and raw_data[0] in [0xF1, 0xF5, 0x7E, 0xF3]:
+            i = 1
+            if raw_data[0] in [0xF5, 0x7E]:  # EW or EWA - skip WCC
+                i = 2
+        
+        current_field = None
+        current_addr = 0
+        
+        while i < len(raw_data):
+            byte = raw_data[i]
+            
+            if byte == SBA:  # Set Buffer Address
+                if i + 2 < len(raw_data):
+                    current_addr = self.decode_buffer_address(raw_data[i+1], raw_data[i+2])
+                    i += 3
+                else:
+                    i += 1
+                    
+            elif byte == SF:  # Start Field
+                if i + 1 < len(raw_data):
+                    attr = raw_data[i+1]
+                    if current_field is not None:
+                        current_field['length'] = current_addr - current_field['address']
+                        if current_field['length'] < 0:
+                            current_field['length'] += screen_size
+                    
+                    current_field = {
+                        'address': current_addr + 1,
+                        'protected': (attr & 0x20) != 0,
+                        'numeric': (attr & 0x10) != 0,
+                        'hidden': (attr & 0x0C) == 0x0C,
+                        'length': 0,
+                        'value': b''
+                    }
+                    fields.append(current_field)
+                    current_addr += 1
+                    i += 2
+                else:
+                    i += 1
+                    
+            elif byte == SFE:  # Start Field Extended
+                if i + 1 < len(raw_data):
+                    count = raw_data[i+1]
+                    if i + 2 + count * 2 <= len(raw_data):
+                        if current_field is not None:
+                            current_field['length'] = current_addr - current_field['address']
+                            if current_field['length'] < 0:
+                                current_field['length'] += screen_size
+                        
+                        protected = False
+                        numeric = False
+                        hidden = False
+                        
+                        for j in range(count):
+                            attr_type = raw_data[i + 2 + j * 2]
+                            attr_value = raw_data[i + 3 + j * 2]
+                            if attr_type == 0xC0:
+                                protected = (attr_value & 0x20) != 0
+                                numeric = (attr_value & 0x10) != 0
+                                hidden = (attr_value & 0x0C) == 0x0C
+                        
+                        current_field = {
+                            'address': current_addr + 1,
+                            'protected': protected,
+                            'numeric': numeric,
+                            'hidden': hidden,
+                            'length': 0,
+                            'value': b''
+                        }
+                        fields.append(current_field)
+                        current_addr += 1
+                        i += 2 + count * 2
+                    else:
+                        i += 1
+                else:
+                    i += 1
+                    
+            elif byte in [0x28, 0x2C, 0x3C]:  # SA, MF, RA
+                if byte == 0x28:
+                    i += 3
+                elif byte == 0x2C:
+                    if i + 1 < len(raw_data):
+                        count = raw_data[i+1]
+                        i += 2 + count * 2
+                    else:
+                        i += 1
+                elif byte == 0x3C:
+                    i += 4
+                else:
+                    i += 1
+                    
+            elif byte == 0x13:  # IC
+                i += 1
+            elif byte == 0x05:  # PT
+                i += 1
+            elif byte == 0x08:  # GE
+                i += 2
+            elif byte == 0x12:  # EUA
+                i += 4
+            else:
+                # Regular data byte
+                if current_field is not None:
+                    current_field['value'] += bytes([byte])
+                current_addr += 1
+                i += 1
+        
+        # Finalize last field
+        if current_field is not None and current_field['length'] == 0:
+            current_field['length'] = screen_size - current_field['address']
+        
+        return fields
+    
+    def get_input_fields(self, raw_data=None):
+        """Get only unprotected (editable) fields."""
+        return [f for f in self.parse_screen_fields(raw_data) if not f['protected']]
+    
+    def get_protected_fields(self, raw_data=None):
+        """Get only protected (read-only) fields."""
+        return [f for f in self.parse_screen_fields(raw_data) if f['protected'] and not f['hidden']]
+    
+    def get_hidden_fields(self, raw_data=None):
+        """Get only hidden fields."""
+        return [f for f in self.parse_screen_fields(raw_data) if f['hidden']]
+    
+    # =========================================================================
+    # Field Attribute Helpers
+    # =========================================================================
+    
+    def is_field_protected(self, attr_byte):
+        """Check if field attribute indicates protected (read-only)."""
+        return (attr_byte & 0x20) != 0
+    
+    def is_field_numeric(self, attr_byte):
+        """Check if field attribute indicates numeric-only."""
+        return (attr_byte & 0x10) != 0
+    
+    def is_field_hidden(self, attr_byte):
+        """Check if field attribute indicates hidden/invisible."""
+        return (attr_byte & 0x0C) == 0x0C
+    
+    # =========================================================================
+    # Response Analysis
+    # =========================================================================
+    
+    def check_abend(self, response=None):
+        """
+        Check if response contains a mainframe abend/error.
+        
+        Args:
+            response: ASCII response string. If None, gets last server response.
+            
+        Returns:
+            Abend code if found, None otherwise.
+        """
+        if response is None:
+            response = self.get_last_server()
+        
+        response_upper = response.upper()
+        for pattern in self.ABEND_PATTERNS:
+            if pattern in response_upper:
+                return pattern
+        return None
+    
+    def test_connection(self):
+        """
+        Test if the API connection and mainframe are responsive.
+        
+        Returns:
+            True if connection is alive and responsive.
+        """
+        try:
+            self.send_aid('ENTER')
+            time.sleep(0.2)
+            response = self.get_last_server()
+            return len(response) > 0
+        except:
+            return False
+    
+    # =========================================================================
+    # Packet Building
+    # =========================================================================
+    
+    def build_raw_packet(self, data, cursor_addr=None, field_addr=None, aid=0x7D):
+        """
+        Build a raw TN3270 packet with proper headers.
+        
+        Args:
+            data: Data bytes to include (already EBCDIC if text)
+            cursor_addr: 2-byte cursor address, or int position
+            field_addr: 2-byte field address, or int position (adds SBA)
+            aid: AID byte (default ENTER = 0x7D)
+            
+        Returns:
+            Complete packet including TN3270E header if needed
+        """
+        SBA = 0x11
+        IAC_EOR = bytes([0xFF, 0xEF])
+        
+        # Handle cursor address
+        if cursor_addr is None:
+            cursor_addr = bytes([0x40, 0x40])
+        elif isinstance(cursor_addr, int):
+            cursor_addr = self.encode_buffer_address(cursor_addr)
+        
+        # Build packet
+        if self.is_tn3270e():
+            packet = bytes([0x00, 0x00, 0x00, 0x00, 0x01, aid]) + cursor_addr
+        else:
+            packet = bytes([aid]) + cursor_addr
+        
+        # Add field address if specified
+        if field_addr is not None:
+            if isinstance(field_addr, int):
+                field_addr = self.encode_buffer_address(field_addr)
+            packet += bytes([SBA]) + field_addr
+        
+        packet += data + IAC_EOR
+        return packet
 
 
 # Convenience function
