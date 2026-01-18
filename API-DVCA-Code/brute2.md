@@ -115,7 +115,7 @@ The API converts ASCII to EBCDIC byte-by-byte:
 ```python
 for code in codes:
     packet = build_code_packet(api, code)
-    api.send_raw(packet)
+    api.send_raw(packet, f'Brute: code {code}')
     time.sleep(DELAY)
     
     response = api.get_last_server()

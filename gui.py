@@ -36,6 +36,17 @@ class NumericTreeWidgetItem(QTreeWidgetItem):
                 pass
         return self.text(column) < other.text(column)
 
+class FuzzingTreeWidgetItem(QTreeWidgetItem):
+    """Custom QTreeWidgetItem for Fuzzing tabs - sorts # (col 0) and Response Length (col 4) numerically"""
+    def __lt__(self, other):
+        column = self.treeWidget().sortColumn()
+        if column in (0, 4):  # # and Response Length columns - integer
+            try:
+                return int(self.text(column)) < int(other.text(column))
+            except ValueError:
+                pass
+        return self.text(column) < other.text(column)
+
 class AnalysisTreeWidgetItem(QTreeWidgetItem):
     """Custom QTreeWidgetItem for Analysis tab - sorts Req(1), Resp(2), Len(4) numerically"""
     def __lt__(self, other):
@@ -292,9 +303,11 @@ class Hack3270GUI(QMainWindow):
         self.tab0_height = 200   # Tab 0: Hack Field Attributes
         self.tab1_height = 180   # Tab 1: Inject Into Fields
         self.tab2_height = 250   # Tab 2: Inject Key Presses
-        self.tab3_height = 180   # Tab 3: AID Spoofing (same as Inject Into Fields)
-        self.tab5_height = 425   # Tab 5: Statistics
-        self.tall_height = 525   # Tabs 4 & 6: Logs and Help
+        self.tab3_height = 180   # Tab 3: AID Spoofing
+        self.tab4_height = 700   # Tab 4: Field Fuzzing
+        self.tab5_height = 700   # Tab 5: Order Fuzzing
+        self.tab8_height = 425   # Tab 8: Statistics
+        self.tall_height = 525   # Tabs 6, 7 & 9: Logs, Analysis, Help
         self.user_tall_height = self.tall_height  # Remember user's preferred tall height
         
         # Central widget
@@ -322,6 +335,8 @@ class Hack3270GUI(QMainWindow):
         self.create_inject_fields_tab()
         self.create_inject_keys_tab()
         self.create_aid_spoofing_tab()
+        self.create_field_fuzzing_tab()
+        self.create_order_fuzzing_tab()
         self.create_logs_tab()
         self.create_analysis_tab()
         self.create_statistics_tab()
@@ -329,7 +344,7 @@ class Hack3270GUI(QMainWindow):
         
         # Disable tabs in offline mode
         if self.hack3270.is_offline():
-            for i in range(4):  # Disable first 4 tabs (including AID Spoofing)
+            for i in range(6):  # Disable first 6 tabs (including AID Spoofing, Field Fuzzing, Order Fuzzing)
                 self.tabs.setTabEnabled(i, False)
         
         # Full horizontal width, start with tab 0 height
@@ -343,10 +358,11 @@ class Hack3270GUI(QMainWindow):
         
     def on_tab_changed(self, index):
         """Keep full width, minimize height on compact tabs, restore tall on Logs/Analysis/Help"""
-        # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing, 4=Logs, 5=Analysis, 6=Statistics, 7=Help
+        # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing, 
+        #              4=Field Fuzzing, 5=Order Fuzzing, 6=Logs, 7=Analysis, 8=Statistics, 9=Help
         
         # Save tall height when leaving tall tabs (Logs, Analysis, Help)
-        if self.last_tab_index in [4, 5, 7]:
+        if self.last_tab_index in [6, 7, 9]:
             self.user_tall_height = self.height()
         
         # Handle height - each tab has its own height
@@ -358,11 +374,15 @@ class Hack3270GUI(QMainWindow):
             self.resize(self.screen_width, self.tab2_height)
         elif index == 3:  # AID Spoofing
             self.resize(self.screen_width, self.tab3_height)
-        elif index == 6:  # Statistics
+        elif index == 4:  # Field Fuzzing
+            self.resize(self.screen_width, self.tab4_height)
+        elif index == 5:  # Order Fuzzing
             self.resize(self.screen_width, self.tab5_height)
+        elif index == 8:  # Statistics
+            self.resize(self.screen_width, self.tab8_height)
         
-        elif index in [4, 5, 7]:  # Logs, Analysis, or Help
-            if index == 4:
+        elif index in [6, 7, 9]:  # Logs, Analysis, or Help
+            if index == 6:  # Logs
                 self.update_logs_tab()
                 # Scroll to last item on first visit to Logs tab
                 if not self.logs_initial_scroll_done and self.log_tree.topLevelItemCount() > 0:
@@ -719,6 +739,391 @@ class Hack3270GUI(QMainWindow):
         
         layout.addStretch()
         self.tabs.addTab(tab, "AID Spoofing")
+    
+    def create_field_fuzzing_tab(self):
+        """Create the Field Fuzzing tab for fuzzing discovered screen fields."""
+        tab = QWidget()
+        main_layout = QHBoxLayout(tab)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        
+        # ===== LEFT COLUMN: Target Fields (1/3 width, full height) =====
+        self.fuzz_target_group = QGroupBox("Target Fields")
+        target_layout = QVBoxLayout()
+        target_layout.setSpacing(5)
+        
+        # Field type checkboxes
+        field_type_layout = QHBoxLayout()
+        self.fuzz_input_fields = QCheckBox("Input")
+        self.fuzz_input_fields.setChecked(True)
+        self.fuzz_protected_fields = QCheckBox("Protected")
+        self.fuzz_hidden_fields = QCheckBox("Hidden")
+        field_type_layout.addWidget(self.fuzz_input_fields)
+        field_type_layout.addWidget(self.fuzz_protected_fields)
+        field_type_layout.addWidget(self.fuzz_hidden_fields)
+        target_layout.addLayout(field_type_layout)
+        
+        # Discover button
+        discover_layout = QHBoxLayout()
+        self.fuzz_discover_btn = QPushButton("Discover Fields")
+        self.fuzz_discover_btn.clicked.connect(self.on_fuzz_discover_fields)
+        discover_layout.addWidget(self.fuzz_discover_btn)
+        self.fuzz_field_count_label = QLabel("0 fields")
+        discover_layout.addWidget(self.fuzz_field_count_label)
+        discover_layout.addStretch()
+        target_layout.addLayout(discover_layout)
+        
+        # Field list (takes remaining space)
+        self.fuzz_field_list = QTreeWidget()
+        self.fuzz_field_list.setHeaderLabels(["#", "Type", "Addr", "Len", "Value"])
+        self.fuzz_field_list.setSelectionMode(QTreeWidget.SelectionMode.MultiSelection)
+        self.fuzz_field_list.header().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        target_layout.addWidget(self.fuzz_field_list, 1)  # Stretch factor 1
+        
+        # All/None buttons for field selection
+        field_select_layout = QHBoxLayout()
+        field_all_btn = QPushButton("All")
+        field_all_btn.setMaximumWidth(60)
+        field_all_btn.clicked.connect(self.fuzz_select_all_fields)
+        field_none_btn = QPushButton("None")
+        field_none_btn.setMaximumWidth(80)
+        field_none_btn.clicked.connect(self.fuzz_deselect_all_fields)
+        field_select_layout.addWidget(field_all_btn)
+        field_select_layout.addWidget(field_none_btn)
+        field_select_layout.addStretch()
+        target_layout.addLayout(field_select_layout)
+        
+        self.fuzz_target_group.setLayout(target_layout)
+        main_layout.addWidget(self.fuzz_target_group, 1)  # 1/3 weight
+        
+        # ===== RIGHT SIDE (2/3 width) =====
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+        
+        # ----- TOP ROW: Payload Categories | Options | Controls -----
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+        
+        # Payload Categories
+        payload_group = QGroupBox("Payload Categories")
+        payload_layout = QGridLayout()
+        payload_layout.setSpacing(2)
+        self.fuzz_payloads = {}
+        payload_defs = [
+            ('overflow', 'Buffer Overflow'),
+            ('packed_decimal', 'Packed Decimal'),
+            ('zoned_decimal', 'Zoned Decimal'),
+            ('dates', 'Date/Time'),
+            ('ebcdic_control', 'EBCDIC Control'),
+            ('cics_injection', 'CICS Injection'),
+            ('sql_injection', 'SQL Injection'),
+            ('cobol_special', 'COBOL Special'),
+            ('random_binary', 'Random Binary'),
+            ('boundary', 'Boundary Test'),
+        ]
+        for i, (key, label) in enumerate(payload_defs):
+            cb = QCheckBox(label)
+            cb.setChecked(False)  # Default to unchecked
+            self.fuzz_payloads[key] = cb
+            payload_layout.addWidget(cb, i // 2, i % 2)
+        select_layout = QHBoxLayout()
+        select_all_btn = QPushButton("All")
+        select_all_btn.setMaximumWidth(60)
+        select_all_btn.clicked.connect(lambda: self.fuzz_set_all_payloads(True))
+        deselect_all_btn = QPushButton("None")
+        deselect_all_btn.setMaximumWidth(80)
+        deselect_all_btn.clicked.connect(lambda: self.fuzz_set_all_payloads(False))
+        select_layout.addWidget(select_all_btn)
+        select_layout.addWidget(deselect_all_btn)
+        select_layout.addStretch()
+        payload_layout.addLayout(select_layout, (len(payload_defs) + 1) // 2, 0, 1, 2)
+        payload_group.setLayout(payload_layout)
+        top_row.addWidget(payload_group)
+        
+        # Options
+        options_group = QGroupBox("Options")
+        options_layout = QVBoxLayout()
+        options_layout.setSpacing(2)
+        delay_layout = QHBoxLayout()
+        delay_layout.addWidget(QLabel("Delay (ms):"))
+        self.fuzz_delay_input = QLineEdit("300")
+        self.fuzz_delay_input.setMaximumWidth(50)
+        delay_layout.addWidget(self.fuzz_delay_input)
+        delay_layout.addStretch()
+        options_layout.addLayout(delay_layout)
+        self.fuzz_stop_on_abend = QCheckBox("Stop on ABEND")
+        self.fuzz_stop_on_abend.setChecked(True)
+        options_layout.addWidget(self.fuzz_stop_on_abend)
+        self.fuzz_stop_on_disconnect = QCheckBox("Stop on disconnect")
+        self.fuzz_stop_on_disconnect.setChecked(True)
+        options_layout.addWidget(self.fuzz_stop_on_disconnect)
+        options_layout.addStretch()
+        options_group.setLayout(options_layout)
+        top_row.addWidget(options_group)
+        
+        # Controls
+        controls_group = QGroupBox("Controls")
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(3)
+        status_layout = QHBoxLayout()
+        status_layout.addWidget(QLabel("Status:"))
+        self.fuzz_status_label = QLabel("Ready")
+        self.fuzz_status_label.setProperty("class", "status-warning")
+        status_layout.addWidget(self.fuzz_status_label)
+        status_layout.addStretch()
+        controls_layout.addLayout(status_layout)
+        progress_layout = QHBoxLayout()
+        progress_layout.addWidget(QLabel("Progress:"))
+        self.fuzz_progress_label = QLabel("0 / 0")
+        progress_layout.addWidget(self.fuzz_progress_label)
+        progress_layout.addStretch()
+        controls_layout.addLayout(progress_layout)
+        button_layout = QGridLayout()
+        self.fuzz_start_btn = QPushButton("Start")
+        self.fuzz_start_btn.setProperty("class", "warning")
+        self.fuzz_start_btn.clicked.connect(self.on_fuzz_start)
+        button_layout.addWidget(self.fuzz_start_btn, 0, 0)
+        self.fuzz_stop_btn = QPushButton("Stop")
+        self.fuzz_stop_btn.setProperty("class", "danger")
+        self.fuzz_stop_btn.setEnabled(False)
+        self.fuzz_stop_btn.clicked.connect(self.on_fuzz_stop)
+        button_layout.addWidget(self.fuzz_stop_btn, 0, 1)
+        self.fuzz_pause_btn = QPushButton("Pause")
+        self.fuzz_pause_btn.setEnabled(False)
+        self.fuzz_pause_btn.clicked.connect(self.on_fuzz_pause)
+        button_layout.addWidget(self.fuzz_pause_btn, 1, 0)
+        self.fuzz_resume_btn = QPushButton("Resume")
+        self.fuzz_resume_btn.setProperty("class", "success")
+        self.fuzz_resume_btn.setEnabled(False)
+        self.fuzz_resume_btn.clicked.connect(self.on_fuzz_resume)
+        button_layout.addWidget(self.fuzz_resume_btn, 1, 1)
+        controls_layout.addLayout(button_layout)
+        controls_layout.addStretch()
+        controls_group.setLayout(controls_layout)
+        top_row.addWidget(controls_group)
+        
+        right_layout.addLayout(top_row)
+        
+        # ----- BOTTOM: Findings -----
+        findings_group = QGroupBox("Findings")
+        findings_layout = QVBoxLayout()
+        self.fuzz_findings_tree = QTreeWidget()
+        self.fuzz_findings_tree.setHeaderLabels(["#", "Field", "Payload", "Result", "Response Length"])
+        self.fuzz_findings_tree.setAlternatingRowColors(True)
+        self.fuzz_findings_tree.setSortingEnabled(True)
+        header = self.fuzz_findings_tree.header()
+        header.setMinimumSectionSize(50)  # Ensure # column is wide enough
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.fuzz_findings_tree.setColumnWidth(0, 60)  # Fixed width for # column
+        findings_layout.addWidget(self.fuzz_findings_tree)
+        export_layout = QHBoxLayout()
+        export_layout.addStretch()
+        self.fuzz_clear_btn = QPushButton("Clear Findings")
+        self.fuzz_clear_btn.clicked.connect(self.on_fuzz_clear_findings)
+        export_layout.addWidget(self.fuzz_clear_btn)
+        self.fuzz_export_btn = QPushButton("Export CSV")
+        self.fuzz_export_btn.clicked.connect(self.on_fuzz_export)
+        export_layout.addWidget(self.fuzz_export_btn)
+        findings_layout.addLayout(export_layout)
+        findings_group.setLayout(findings_layout)
+        right_layout.addWidget(findings_group, 1)  # Stretch factor 1
+        
+        main_layout.addWidget(right_widget, 2)  # 2/3 weight
+        
+        self.tabs.addTab(tab, "Field Fuzzing")
+        
+        # Initialize field fuzzing state
+        self.fuzz_running = False
+        self.fuzz_paused = False
+        self.fuzz_discovered_fields = []
+        self.fuzz_current_payloads = []
+        self.fuzz_current_index = 0
+        self.fuzz_finding_count = 0
+        self.fuzz_timer = None
+        self.fuzz_mode = 'field'  # Track which fuzzer is active
+    
+    def create_order_fuzzing_tab(self):
+        """Create the Order Fuzzing tab for TN3270 protocol order injection."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        
+        # ===== TOP SECTION: Controls in Grid =====
+        top_widget = QWidget()
+        top_grid = QGridLayout(top_widget)
+        top_grid.setContentsMargins(0, 0, 0, 0)
+        top_grid.setSpacing(10)
+        
+        # ----- Column 0: Order Injection Types -----
+        orders_group = QGroupBox("Order Injection Types")
+        orders_layout = QVBoxLayout()
+        orders_layout.setSpacing(2)
+        self.order_payloads = {}
+        order_defs = [
+            ('sba', 'SBA (Set Buffer Address)'),
+            ('sf', 'SF (Start Field)'),
+            ('sfe', 'SFE (Start Field Extended)'),
+            ('sa', 'SA (Set Attribute)'),
+            ('mf', 'MF (Modify Field)'),
+            ('ra', 'RA (Repeat to Address)'),
+            ('eua', 'EUA (Erase Unprotected)'),
+            ('ic', 'IC (Insert Cursor)'),
+            ('pt', 'PT (Program Tab)'),
+            ('ge', 'GE (Graphic Escape)'),
+        ]
+        for key, label in order_defs:
+            cb = QCheckBox(label)
+            cb.setChecked(True)
+            self.order_payloads[key] = cb
+            orders_layout.addWidget(cb)
+        select_layout = QHBoxLayout()
+        select_all_btn = QPushButton("All")
+        select_all_btn.setMaximumWidth(60)
+        select_all_btn.clicked.connect(lambda: self.order_set_all_payloads(True))
+        deselect_all_btn = QPushButton("None")
+        deselect_all_btn.setMaximumWidth(80)
+        deselect_all_btn.clicked.connect(lambda: self.order_set_all_payloads(False))
+        select_layout.addWidget(select_all_btn)
+        select_layout.addWidget(deselect_all_btn)
+        select_layout.addStretch()
+        orders_layout.addLayout(select_layout)
+        orders_group.setLayout(orders_layout)
+        top_grid.addWidget(orders_group, 0, 0)
+        
+        # ----- Column 1: Additional Payloads -----
+        extra_group = QGroupBox("Additional Payloads")
+        extra_layout = QVBoxLayout()
+        extra_layout.setSpacing(2)
+        extra_defs = [
+            ('telnet_iac', 'Telnet IAC Sequences'),
+            ('attr_bytes', 'Field Attribute Bytes'),
+            ('ext_attrs', 'Extended Attributes'),
+            ('random_orders', 'Random Order Sequences'),
+        ]
+        for key, label in extra_defs:
+            cb = QCheckBox(label)
+            cb.setChecked(True)
+            self.order_payloads[key] = cb
+            extra_layout.addWidget(cb)
+        extra_layout.addStretch()
+        extra_group.setLayout(extra_layout)
+        top_grid.addWidget(extra_group, 0, 1)
+        
+        # ----- Column 2: Options + Controls -----
+        col2_widget = QWidget()
+        col2_layout = QVBoxLayout(col2_widget)
+        col2_layout.setContentsMargins(0, 0, 0, 0)
+        col2_layout.setSpacing(5)
+        
+        options_group = QGroupBox("Options")
+        options_layout = QVBoxLayout()
+        options_layout.setSpacing(2)
+        delay_layout = QHBoxLayout()
+        delay_layout.addWidget(QLabel("Delay (ms):"))
+        self.order_delay_input = QLineEdit("300")
+        self.order_delay_input.setMaximumWidth(50)
+        delay_layout.addWidget(self.order_delay_input)
+        delay_layout.addStretch()
+        options_layout.addLayout(delay_layout)
+        self.order_stop_on_abend = QCheckBox("Stop on ABEND")
+        self.order_stop_on_abend.setChecked(True)
+        options_layout.addWidget(self.order_stop_on_abend)
+        self.order_stop_on_disconnect = QCheckBox("Stop on disconnect")
+        self.order_stop_on_disconnect.setChecked(True)
+        options_layout.addWidget(self.order_stop_on_disconnect)
+        options_group.setLayout(options_layout)
+        col2_layout.addWidget(options_group)
+        
+        controls_group = QGroupBox("Controls")
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(3)
+        status_layout = QHBoxLayout()
+        status_layout.addWidget(QLabel("Status:"))
+        self.order_status_label = QLabel("Ready")
+        self.order_status_label.setProperty("class", "status-warning")
+        status_layout.addWidget(self.order_status_label)
+        status_layout.addStretch()
+        controls_layout.addLayout(status_layout)
+        progress_layout = QHBoxLayout()
+        progress_layout.addWidget(QLabel("Progress:"))
+        self.order_progress_label = QLabel("0 / 0")
+        progress_layout.addWidget(self.order_progress_label)
+        progress_layout.addStretch()
+        controls_layout.addLayout(progress_layout)
+        button_layout = QGridLayout()
+        self.order_start_btn = QPushButton("Start")
+        self.order_start_btn.setProperty("class", "warning")
+        self.order_start_btn.clicked.connect(self.on_order_fuzz_start)
+        button_layout.addWidget(self.order_start_btn, 0, 0)
+        self.order_stop_btn = QPushButton("Stop")
+        self.order_stop_btn.setProperty("class", "danger")
+        self.order_stop_btn.setEnabled(False)
+        self.order_stop_btn.clicked.connect(self.on_order_fuzz_stop)
+        button_layout.addWidget(self.order_stop_btn, 0, 1)
+        self.order_pause_btn = QPushButton("Pause")
+        self.order_pause_btn.setEnabled(False)
+        self.order_pause_btn.clicked.connect(self.on_order_fuzz_pause)
+        button_layout.addWidget(self.order_pause_btn, 1, 0)
+        self.order_resume_btn = QPushButton("Resume")
+        self.order_resume_btn.setProperty("class", "success")
+        self.order_resume_btn.setEnabled(False)
+        self.order_resume_btn.clicked.connect(self.on_order_fuzz_resume)
+        button_layout.addWidget(self.order_resume_btn, 1, 1)
+        controls_layout.addLayout(button_layout)
+        controls_group.setLayout(controls_layout)
+        col2_layout.addWidget(controls_group)
+        col2_layout.addStretch()
+        
+        top_grid.addWidget(col2_widget, 0, 2)
+        top_grid.setColumnStretch(0, 1)
+        top_grid.setColumnStretch(1, 1)
+        top_grid.setColumnStretch(2, 1)
+        layout.addWidget(top_widget)
+        
+        # ===== BOTTOM: Findings =====
+        findings_group = QGroupBox("Findings")
+        findings_layout = QVBoxLayout()
+        self.order_findings_tree = QTreeWidget()
+        self.order_findings_tree.setHeaderLabels(["#", "Order", "Payload", "Result", "Response Length"])
+        self.order_findings_tree.setAlternatingRowColors(True)
+        self.order_findings_tree.setSortingEnabled(True)
+        header = self.order_findings_tree.header()
+        header.setMinimumSectionSize(50)  # Ensure # column is wide enough
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.order_findings_tree.setColumnWidth(0, 60)  # Fixed width for # column
+        findings_layout.addWidget(self.order_findings_tree)
+        export_layout = QHBoxLayout()
+        export_layout.addStretch()
+        self.order_clear_btn = QPushButton("Clear Findings")
+        self.order_clear_btn.clicked.connect(self.on_order_clear_findings)
+        export_layout.addWidget(self.order_clear_btn)
+        self.order_export_btn = QPushButton("Export CSV")
+        self.order_export_btn.clicked.connect(self.on_order_export)
+        export_layout.addWidget(self.order_export_btn)
+        findings_layout.addLayout(export_layout)
+        findings_group.setLayout(findings_layout)
+        layout.addWidget(findings_group, 1)
+        
+        self.tabs.addTab(tab, "Order Fuzzing")
+        
+        # Initialize order fuzzing state
+        self.order_running = False
+        self.order_paused = False
+        self.order_current_payloads = []
+        self.order_current_index = 0
+        self.order_finding_count = 0
+        self.order_timer = None
         
     def create_logs_tab(self):
         tab = QWidget()
@@ -959,11 +1364,35 @@ class Hack3270GUI(QMainWindow):
         AID_FUZZ_PATTERN = r'AID Fuzz:\s*\d+/\d+\s*\([^-]+-\s*([^)]+)\)'
         AID_SPOOF_PATTERN = r'AID Spoofed:\s*\w+\s*->\s*(\w+)'
         FIELD_INJECTION_PATTERN = r'Sending:\s*(.+)'
+        # Match: "Fuzz: target/payload" or "Brute: value"
+        FUZZ_PATTERN = r'^Fuzz:\s*(.+)/(.+)$'
+        BRUTE_PATTERN = r'^Brute:\s*(.+)$'
+        # Abend patterns
+        ABEND_PATTERNS = [
+            (r'DFHAC2\d{3}', 'CICS Abend'),
+            (r'ABEND\s+\w+', 'Abend'),
+            (r'\bASRA\b', 'ASRA'),
+            (r'\bAICA\b', 'AICA'),
+            (r'\bAEY7\b', 'AEY7'),
+            (r'\bAEY9\b', 'AEY9'),
+            (r'\bAPCT\b', 'APCT'),
+            (r'\bSOC7\b', 'SOC7'),
+            (r'\bSOC4\b', 'SOC4'),
+            (r'\bSOC1\b', 'SOC1'),
+        ]
+        # Error patterns
+        ERROR_PATTERNS = [
+            (r'NOT\s+FOUND', 'NOT FOUND'),
+            (r'UNDEFINED', 'UNDEFINED'),
+            (r'UNKNOWN\s+TRANSACTION', 'UNKNOWN TRANSACTION'),
+        ]
         
         hidden_values = 0
         hidden_labels = 0
         key_transitions = 0
         field_transitions = 0
+        fuzz_abends = 0
+        fuzz_errors = 0
         
         # ===== HIDDEN FIELD ANALYSIS =====
         for record in all_logs:
@@ -1169,6 +1598,98 @@ class Hack3270GUI(QMainWindow):
                 prev_entry = entry
                 prev_was_normal = not is_anomaly
         
+        # ===== FUZZING ANALYSIS (API) =====
+        # Detect: "Fuzz: target/payload" or "Brute: value" patterns
+        fuzz_entries = []
+        for i, record in enumerate(all_logs):
+            if record[2] == 'C':  # Client
+                target = None
+                payload = None
+                fuzz_type = None
+                
+                # Check for Fuzz: pattern
+                match = re.match(FUZZ_PATTERN, record[3])
+                if match:
+                    target = match.group(1).strip()
+                    payload = match.group(2).strip()
+                    fuzz_type = 'Fuzz'
+                else:
+                    # Check for Brute: pattern
+                    match = re.match(BRUTE_PATTERN, record[3])
+                    if match:
+                        payload = match.group(1).strip()
+                        target = 'Code'
+                        fuzz_type = 'Brute'
+                
+                if fuzz_type:
+                    # Find next server response
+                    for j in range(i + 1, min(i + 5, len(all_logs))):
+                        if all_logs[j][2] == 'S':
+                            resp_data = self.hack3270.parse_3270(
+                                self.hack3270.get_ascii(all_logs[j][5])
+                            ) if all_logs[j][5] else ""
+                            fuzz_entries.append({
+                                'request_id': record[0],
+                                'timestamp': float(record[1]),
+                                'response_id': all_logs[j][0],
+                                'fuzz_type': fuzz_type,
+                                'target': target,
+                                'payload': payload,
+                                'length': all_logs[j][4],
+                                'data': resp_data
+                            })
+                            break
+        
+        # Analyze fuzz entries for abends and errors
+        for entry in fuzz_entries:
+            abend_found = None
+            error_found = None
+            
+            # Check for abends
+            for pattern, name in ABEND_PATTERNS:
+                if re.search(pattern, entry['data'], re.IGNORECASE):
+                    abend_found = name
+                    break
+            
+            # Check for errors (only if no abend)
+            if not abend_found:
+                for pattern, name in ERROR_PATTERNS:
+                    if re.search(pattern, entry['data'], re.IGNORECASE):
+                        error_found = name
+                        break
+            
+            if abend_found:
+                fuzz_abends += 1
+                item = AnalysisTreeWidgetItem([
+                    "Fuzz",
+                    str(entry['request_id']),
+                    str(entry['response_id']),
+                    f"{entry['target']}/{entry['payload'][:12]}",
+                    str(entry['length']),
+                    f"ABEND: {abend_found}"
+                ])
+                item.setForeground(0, QColor("#ff6b6b"))  # Red
+                item.setForeground(5, QColor("#ff6b6b"))
+                item.setTextAlignment(1, Qt.AlignCenter)
+                item.setTextAlignment(2, Qt.AlignCenter)
+                self.analysis_tree.addTopLevelItem(item)
+            
+            elif error_found:
+                fuzz_errors += 1
+                item = AnalysisTreeWidgetItem([
+                    "Fuzz",
+                    str(entry['request_id']),
+                    str(entry['response_id']),
+                    f"{entry['target']}/{entry['payload'][:12]}",
+                    str(entry['length']),
+                    f"ERROR: {error_found}"
+                ])
+                item.setForeground(0, QColor("#ffd93d"))  # Yellow
+                item.setForeground(5, QColor("#ffd93d"))
+                item.setTextAlignment(1, Qt.AlignCenter)
+                item.setTextAlignment(2, Qt.AlignCenter)
+                self.analysis_tree.addTopLevelItem(item)
+        
         # Sort results by Request ID (column 1) numerically
         self.analysis_tree.sortItems(1, Qt.AscendingOrder)
         
@@ -1182,6 +1703,10 @@ class Hack3270GUI(QMainWindow):
             parts.append(f"{key_transitions} AID transitions")
         if field_transitions > 0:
             parts.append(f"{field_transitions} field transitions")
+        if fuzz_abends > 0:
+            parts.append(f"{fuzz_abends} fuzz abends")
+        if fuzz_errors > 0:
+            parts.append(f"{fuzz_errors} fuzz errors")
         
         if parts:
             self.analysis_status.setText("Found: " + ", ".join(parts))
@@ -1491,6 +2016,909 @@ class Hack3270GUI(QMainWindow):
     def on_aid_resume_clicked(self):
         """Handle RESUME button click for FUZZER mode."""
         self.hack3270.resume_aid_fuzzer()
+    
+    # =========================================================================
+    # Fuzzing Tab Handlers
+    # =========================================================================
+    
+    def on_fuzz_discover_fields(self):
+        """Discover fields from the current screen."""
+        try:
+            # Get last server response
+            raw_data = self.hack3270.get_last_server_raw()
+            if not raw_data:
+                self.fuzz_field_count_label.setText("No screen data available")
+                return
+            
+            # Parse fields using the API-style parsing
+            fields = self._parse_screen_fields(raw_data)
+            
+            # Filter based on checkboxes
+            self.fuzz_discovered_fields = []
+            for f in fields:
+                if f['hidden'] and self.fuzz_hidden_fields.isChecked():
+                    self.fuzz_discovered_fields.append(f)
+                elif f['protected'] and not f['hidden'] and self.fuzz_protected_fields.isChecked():
+                    self.fuzz_discovered_fields.append(f)
+                elif not f['protected'] and not f['hidden'] and self.fuzz_input_fields.isChecked():
+                    self.fuzz_discovered_fields.append(f)
+            
+            # Update the field list
+            self.fuzz_field_list.clear()
+            for i, f in enumerate(self.fuzz_discovered_fields):
+                ftype = 'Hidden' if f['hidden'] else ('Protected' if f['protected'] else 'Input')
+                addr_bytes = self._encode_buffer_address(f['address'])
+                addr_str = f"{addr_bytes[0]:02X} {addr_bytes[1]:02X}"
+                # Convert EBCDIC value to ASCII for display
+                value_str = ""
+                if f.get('value'):
+                    try:
+                        value_str = f['value'].decode('cp500').strip()
+                        # Truncate long values for display
+                        if len(value_str) > 30:
+                            value_str = value_str[:27] + "..."
+                    except:
+                        value_str = f['value'].hex()[:20]
+                item = QTreeWidgetItem([str(i+1), ftype, addr_str, str(f['length']), value_str])
+                item.setSelected(True)  # Select all by default
+                self.fuzz_field_list.addTopLevelItem(item)
+            
+            self.fuzz_field_count_label.setText(f"{len(self.fuzz_discovered_fields)} fields discovered")
+            
+        except Exception as e:
+            self.fuzz_field_count_label.setText(f"Error: {str(e)}")
+    
+    def _parse_screen_fields(self, raw_data):
+        """Parse 3270 data stream to find all fields (mirrors API logic)."""
+        fields = []
+        i = 0
+        screen_size = 80 * 24
+        
+        SBA = 0x11
+        SF = 0x1D
+        SFE = 0x29
+        
+        # Skip command bytes at start
+        if len(raw_data) > 0 and raw_data[0] in [0xF1, 0xF5, 0x7E, 0xF3]:
+            i = 1
+            if raw_data[0] in [0xF5, 0x7E]:  # EW or EWA - skip WCC
+                i = 2
+        
+        current_field = None
+        current_addr = 0
+        addr_table = [
+            0x40, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
+            0xC8, 0xC9, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+            0x50, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7,
+            0xD8, 0xD9, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
+            0x60, 0x61, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7,
+            0xE8, 0xE9, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
+            0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7,
+            0xF8, 0xF9, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
+        ]
+        
+        def decode_addr(b1, b2):
+            if b1 & 0xC0 == 0x00:
+                return ((b1 & 0x3F) << 8) | b2
+            else:
+                try:
+                    high = addr_table.index(b1)
+                    low = addr_table.index(b2)
+                    return (high << 6) | low
+                except ValueError:
+                    return -1
+        
+        while i < len(raw_data):
+            byte = raw_data[i]
+            
+            if byte == SBA:
+                if i + 2 < len(raw_data):
+                    current_addr = decode_addr(raw_data[i+1], raw_data[i+2])
+                    i += 3
+                else:
+                    i += 1
+            elif byte == SF:
+                if i + 1 < len(raw_data):
+                    attr = raw_data[i+1]
+                    if current_field is not None:
+                        current_field['length'] = current_addr - current_field['address']
+                        if current_field['length'] < 0:
+                            current_field['length'] += screen_size
+                    
+                    current_field = {
+                        'address': current_addr + 1,
+                        'protected': (attr & 0x20) != 0,
+                        'numeric': (attr & 0x10) != 0,
+                        'hidden': (attr & 0x0C) == 0x0C,
+                        'length': 0,
+                        'value': b''
+                    }
+                    fields.append(current_field)
+                    current_addr += 1
+                    i += 2
+                else:
+                    i += 1
+            elif byte == SFE:
+                if i + 1 < len(raw_data):
+                    count = raw_data[i+1]
+                    if i + 2 + count * 2 <= len(raw_data):
+                        if current_field is not None:
+                            current_field['length'] = current_addr - current_field['address']
+                            if current_field['length'] < 0:
+                                current_field['length'] += screen_size
+                        
+                        protected = False
+                        numeric = False
+                        hidden = False
+                        
+                        for j in range(count):
+                            attr_type = raw_data[i + 2 + j * 2]
+                            attr_value = raw_data[i + 3 + j * 2]
+                            if attr_type == 0xC0:
+                                protected = (attr_value & 0x20) != 0
+                                numeric = (attr_value & 0x10) != 0
+                                hidden = (attr_value & 0x0C) == 0x0C
+                        
+                        current_field = {
+                            'address': current_addr + 1,
+                            'protected': protected,
+                            'numeric': numeric,
+                            'hidden': hidden,
+                            'length': 0,
+                            'value': b''
+                        }
+                        fields.append(current_field)
+                        current_addr += 1
+                        i += 2 + count * 2
+                    else:
+                        i += 1
+                else:
+                    i += 1
+            elif byte in [0x28, 0x2C, 0x3C]:  # SA, MF, RA
+                if byte == 0x28:
+                    i += 3
+                elif byte == 0x2C:
+                    if i + 1 < len(raw_data):
+                        count = raw_data[i+1]
+                        i += 2 + count * 2
+                    else:
+                        i += 1
+                elif byte == 0x3C:
+                    i += 4
+            elif byte == 0x13:  # IC
+                i += 1
+            elif byte == 0x05:  # PT
+                i += 1
+            elif byte == 0x08:  # GE
+                i += 2
+            elif byte == 0x12:  # EUA
+                i += 4
+            else:
+                if current_field is not None:
+                    current_field['value'] += bytes([byte])
+                current_addr += 1
+                i += 1
+        
+        if current_field is not None and current_field['length'] == 0:
+            current_field['length'] = screen_size - current_field['address']
+        
+        return fields
+    
+    def _encode_buffer_address(self, addr):
+        """Encode buffer position to 12-bit address bytes."""
+        addr_table = [
+            0x40, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
+            0xC8, 0xC9, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+            0x50, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7,
+            0xD8, 0xD9, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
+            0x60, 0x61, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7,
+            0xE8, 0xE9, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
+            0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7,
+            0xF8, 0xF9, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
+        ]
+        high = (addr >> 6) & 0x3F
+        low = addr & 0x3F
+        return bytes([addr_table[high], addr_table[low]])
+    
+    def fuzz_set_all_payloads(self, checked):
+        """Set all payload checkboxes to the given state."""
+        for cb in self.fuzz_payloads.values():
+            cb.setChecked(checked)
+    
+    def fuzz_select_all_fields(self):
+        """Select all fields in the field list."""
+        for i in range(self.fuzz_field_list.topLevelItemCount()):
+            self.fuzz_field_list.topLevelItem(i).setSelected(True)
+    
+    def fuzz_deselect_all_fields(self):
+        """Deselect all fields in the field list."""
+        for i in range(self.fuzz_field_list.topLevelItemCount()):
+            self.fuzz_field_list.topLevelItem(i).setSelected(False)
+    
+    def on_fuzz_start(self):
+        """Handle Start Fuzzing button click - show warning and start if confirmed."""
+        from PySide6.QtWidgets import QMessageBox
+        
+        # Show warning dialog
+        warning = QMessageBox()
+        warning.setIcon(QMessageBox.Icon.Warning)
+        warning.setWindowTitle("⚠️ DANGER: Fuzzing Warning")
+        warning.setText(
+            "<b>WARNING: Fuzzing can crash or corrupt the target system!</b>"
+        )
+        warning.setInformativeText(
+            "Fuzzing sends malformed data to discover vulnerabilities. This can cause:\n\n"
+            "• Application crashes (ABENDs)\n"
+            "• Data corruption\n"
+            "• System instability\n"
+            "• Service disruption\n\n"
+            "ONLY run this on test/development systems!\n\n"
+            "By clicking 'I Understand', you confirm that:\n"
+            "1. This is NOT a production system\n"
+            "2. You have PERMISSION to test this system\n"
+            "3. You accept responsibility for any consequences"
+        )
+        
+        understand_btn = warning.addButton("I understand and have permission!", QMessageBox.ButtonRole.AcceptRole)
+        warning.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        
+        warning.exec()
+        
+        if warning.clickedButton() != understand_btn:
+            return
+        
+        # Validate that fields are discovered
+        selected_items = self.fuzz_field_list.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "No Fields Selected", 
+                "Please discover and select fields to fuzz first.")
+            return
+        
+        # Validate at least one payload category is selected
+        selected_payloads = [k for k, cb in self.fuzz_payloads.items() if cb.isChecked() and cb.isVisible()]
+        if not selected_payloads:
+            QMessageBox.warning(self, "No Payloads Selected", 
+                "Please select at least one payload category.")
+            return
+        
+        # Start fuzzing
+        self._start_fuzzing(selected_payloads)
+    
+    def _start_fuzzing(self, payload_categories):
+        """Initialize and start the fuzzing process."""
+        self.fuzz_running = True
+        self.fuzz_paused = False
+        self.fuzz_finding_count = 0
+        
+        # Update UI state
+        self.fuzz_start_btn.setEnabled(False)
+        self.fuzz_stop_btn.setEnabled(True)
+        self.fuzz_pause_btn.setEnabled(True)
+        self.fuzz_resume_btn.setEnabled(False)
+        self.fuzz_discover_btn.setEnabled(False)
+        self.fuzz_status_label.setText("Initializing...")
+        
+        # Generate payloads
+        self.fuzz_current_payloads = self._generate_payloads(payload_categories)
+        self.fuzz_current_index = 0
+        
+        total = len(self.fuzz_current_payloads)
+        self.fuzz_progress_label.setText(f"0 / {total}")
+        self.fuzz_status_label.setText("Fuzzing...")
+        self.fuzz_status_label.setProperty("class", "status-info")
+        self.fuzz_status_label.style().unpolish(self.fuzz_status_label)
+        self.fuzz_status_label.style().polish(self.fuzz_status_label)
+        
+        # Get delay
+        try:
+            delay_ms = int(self.fuzz_delay_input.text())
+        except ValueError:
+            delay_ms = 300
+        
+        # Start timer for fuzzing iterations
+        self.fuzz_timer = QTimer()
+        self.fuzz_timer.timeout.connect(self._fuzz_iteration)
+        self.fuzz_timer.start(delay_ms)
+    
+    def _generate_payloads(self, categories):
+        """Generate all payloads based on selected categories."""
+        payloads = []
+        
+        # Get selected field indices
+        selected_indices = []
+        for i in range(self.fuzz_field_list.topLevelItemCount()):
+            item = self.fuzz_field_list.topLevelItem(i)
+            if item.isSelected():
+                selected_indices.append(i)
+        
+        for field_idx in selected_indices:
+            field = self.fuzz_discovered_fields[field_idx]
+            field_len = field['length'] if field['length'] > 0 else 44
+            
+            for category in categories:
+                category_payloads = self._get_category_payloads(category, field_len)
+                for payload_data, payload_name, is_binary in category_payloads:
+                    payloads.append({
+                        'field_idx': field_idx,
+                        'field': field,
+                        'data': payload_data,
+                        'name': payload_name,
+                        'is_binary': is_binary,
+                        'category': category
+                    })
+        
+        return payloads
+    
+    def _get_category_payloads(self, category, field_length):
+        """Get payloads for a specific category."""
+        payloads = []
+        
+        if category == 'overflow':
+            sizes = [field_length + 1, field_length + 4, field_length * 2, 50, 100, 256]
+            sizes = sorted(set(s for s in sizes if s > field_length))[:6]
+            for length in sizes:
+                payloads.append(('A' * length, f"OVF-{length}", False))
+            payloads.append(('9' * (field_length * 2), f"NUM-OVF-{field_length*2}", False))
+            
+        elif category == 'packed_decimal':
+            payloads.extend([
+                (bytes([0x12, 0x34, 0x5A]), "COMP3-SIGN-A", True),
+                (bytes([0xAB, 0xCD, 0xEF]), "COMP3-HEX-DIGITS", True),
+                (bytes([0xFF, 0xFF, 0xFF, 0xFF]), "COMP3-ALL-F", True),
+                (bytes([0x00, 0x00, 0x00, 0x00]), "COMP3-ALL-0", True),
+            ])
+            
+        elif category == 'zoned_decimal':
+            payloads.extend([
+                (bytes([0x00, 0x01, 0x02, 0x03]), "ZONED-NULL-ZONE", True),
+                (bytes([0x30, 0x31, 0x32, 0x33]), "ZONED-ASCII", True),
+                (bytes([0xC1, 0xC2, 0xC3, 0xC4]), "ZONED-ALPHA-ABCD", True),
+            ])
+            
+        elif category == 'dates':
+            for date_str, name in [
+                ('00000000', 'DATE-NULL'), ('99999999', 'DATE-MAX'),
+                ('20250230', 'DATE-FEB30'), ('20251301', 'DATE-MONTH13'),
+                ('250000', 'TIME-HOUR25'), ('999999', 'TIME-MAX')
+            ]:
+                payloads.append((date_str, name, False))
+                
+        elif category == 'ebcdic_control':
+            for code, name in [(0x00, 'NUL'), (0x0D, 'CR'), (0x15, 'NL'), (0x3F, 'SUB')]:
+                payloads.append((bytes([code] * 4), f"CTRL-{name}", True))
+            payloads.append((bytes([0x0E, 0x0F, 0x0E, 0x0F]), "SHIFT-IO", True))
+            
+        elif category == 'cics_injection':
+            for trans in ['CEMT', 'CEDA', 'CEDF', 'CESF', 'CECI']:
+                payloads.append((trans, f"CICS-{trans}", False))
+            payloads.append(('CEMT SET PROG(*) NEW', 'CICS-CMD-NEWCOPY', False))
+            
+        elif category == 'sql_injection':
+            for sql, name in [
+                ("'", 'SQL-QUOTE'), ("' OR '1'='1", 'SQL-OR-TRUE'),
+                ("'; --", 'SQL-SEMICOLON'), ("' UNION SELECT", 'SQL-UNION'),
+            ]:
+                payloads.append((sql, name, False))
+                
+        elif category == 'cobol_special':
+            for size in [4, 16, 44]:
+                payloads.append((bytes([0x00] * size), f"LOW-VALUES-{size}", True))
+                payloads.append((bytes([0xFF] * size), f"HIGH-VALUES-{size}", True))
+                
+        elif category == 'tn3270_orders':
+            for order_byte, name in [(0x11, 'SBA'), (0x1D, 'SF'), (0x29, 'SFE')]:
+                payloads.append((bytes([order_byte] * 4), f"ORD-{name}-x4", True))
+            payloads.append((bytes([0xFF, 0xEF]), "IAC-EOR", True))
+            payloads.append((bytes([0xFF, 0xFF, 0xFF, 0xFF]), "IAC-FLOOD", True))
+            
+        elif category == 'random_binary':
+            import random
+            for i in range(5):
+                length = random.randint(8, 64)
+                data = bytes([random.randint(0, 255) for _ in range(length)])
+                payloads.append((data, f"RANDOM-{length}B-{i+1}", True))
+                
+        elif category == 'boundary':
+            if field_length > 1:
+                payloads.append(('X' * (field_length - 1), f"BOUND-UNDER", False))
+            payloads.append(('X' * field_length, f"BOUND-EXACT", False))
+            payloads.append(('X' * (field_length + 1), f"BOUND-OVER", False))
+        
+        return payloads
+    
+    def _fuzz_iteration(self):
+        """Execute one fuzzing iteration."""
+        if not self.fuzz_running or self.fuzz_paused:
+            return
+        
+        if self.fuzz_current_index >= len(self.fuzz_current_payloads):
+            self._fuzz_complete()
+            return
+        
+        payload = self.fuzz_current_payloads[self.fuzz_current_index]
+        
+        try:
+            # Build and send the field fuzz packet
+            self._send_field_fuzz(payload)
+            
+            # Check response
+            import time
+            time.sleep(0.1)
+            response = self.hack3270.get_last_server()
+            response_len = len(self.hack3270.get_last_server_raw() or b'')
+            
+            # Check for abend
+            abend = None
+            response_upper = response.upper() if response else ''
+            abend_patterns = ['DFHAC2', 'ABEND', 'ASRA', 'AICA', 'AEY7', 'APCT',
+                              'SOC7', 'SOC4', 'S0C7', 'S0C4', 'ASRB', 'AEXL']
+            for pattern in abend_patterns:
+                if pattern in response_upper:
+                    abend = pattern
+                    break
+            
+            # Record finding if abend detected
+            if abend:
+                self._add_finding(payload, 'ABEND: ' + abend, response_len)
+                if self.fuzz_stop_on_abend.isChecked():
+                    self._fuzz_complete(f"Stopped: ABEND {abend} detected")
+                    return
+            
+        except Exception as e:
+            error_str = str(e)
+            if 'WinError 10053' in error_str or 'Connection' in error_str:
+                self._add_finding(payload, 'CONNECTION LOST', 0)
+                if self.fuzz_stop_on_disconnect.isChecked():
+                    self._fuzz_complete("Stopped: Connection lost")
+                    return
+            else:
+                self._add_finding(payload, f'ERROR: {error_str}', 0)
+        
+        # Update progress
+        self.fuzz_current_index += 1
+        total = len(self.fuzz_current_payloads)
+        self.fuzz_progress_label.setText(f"{self.fuzz_current_index} / {total}")
+    
+    def _send_field_fuzz(self, payload):
+        """Send a field fuzzing packet."""
+        field = payload['field']
+        data = payload['data']
+        is_binary = payload['is_binary']
+        name = payload['name']
+        
+        # Convert ASCII to EBCDIC if needed
+        A2E = {
+            ' ': 0x40, 'a': 0x81, 'b': 0x82, 'c': 0x83, 'd': 0x84, 'e': 0x85, 'f': 0x86, 'g': 0x87,
+            'h': 0x88, 'i': 0x89, 'j': 0x91, 'k': 0x92, 'l': 0x93, 'm': 0x94, 'n': 0x95, 'o': 0x96,
+            'p': 0x97, 'q': 0x98, 'r': 0x99, 's': 0xa2, 't': 0xa3, 'u': 0xa4, 'v': 0xa5, 'w': 0xa6,
+            'x': 0xa7, 'y': 0xa8, 'z': 0xa9, 'A': 0xc1, 'B': 0xc2, 'C': 0xc3, 'D': 0xc4, 'E': 0xc5,
+            'F': 0xc6, 'G': 0xc7, 'H': 0xc8, 'I': 0xc9, 'J': 0xd1, 'K': 0xd2, 'L': 0xd3, 'M': 0xd4,
+            'N': 0xd5, 'O': 0xd6, 'P': 0xd7, 'Q': 0xd8, 'R': 0xd9, 'S': 0xe2, 'T': 0xe3, 'U': 0xe4,
+            'V': 0xe5, 'W': 0xe6, 'X': 0xe7, 'Y': 0xe8, 'Z': 0xe9, '0': 0xf0, '1': 0xf1, '2': 0xf2,
+            '3': 0xf3, '4': 0xf4, '5': 0xf5, '6': 0xf6, '7': 0xf7, '8': 0xf8, '9': 0xf9,
+            '.': 0x4b, '<': 0x4c, '(': 0x4d, '+': 0x4e, '|': 0x4f, '&': 0x50, '!': 0x5a, '$': 0x5b,
+            '*': 0x5c, ')': 0x5d, ';': 0x5e, '-': 0x60, '/': 0x61, ',': 0x6b, '%': 0x6c, '_': 0x6d,
+            '>': 0x6e, '?': 0x6f, ':': 0x7a, '#': 0x7b, '@': 0x7c, "'": 0x7d, '=': 0x7e, '"': 0x7f,
+        }
+        
+        if is_binary:
+            ebcdic_data = data if isinstance(data, bytes) else data.encode('latin-1')
+        else:
+            ebcdic_data = bytes([A2E.get(c, 0x6F) for c in str(data)])
+        
+        # Build packet
+        addr_bytes = self._encode_buffer_address(field['address'])
+        AID_ENTER = 0x7D
+        SBA = 0x11
+        
+        # Check for TN3270E mode
+        header = b''
+        if hasattr(self.hack3270, 'check_inject_3270e') and self.hack3270.check_inject_3270e():
+            header = b'\x00\x00\x00\x00\x01'
+        
+        packet = header + bytes([AID_ENTER, SBA]) + addr_bytes + ebcdic_data
+        
+        # Send via proxy
+        desc = f'Fuzz: Field_{payload["field_idx"]}/{name}'
+        self.hack3270.api_send_raw(packet, desc)
+    
+    def _add_finding(self, payload, result, response_len):
+        """Add a finding to the findings tree."""
+        self.fuzz_finding_count += 1
+        
+        field_name = f"Field {payload['field_idx']}" if payload['field_idx'] >= 0 else "N/A"
+        payload_name = payload['name']
+        
+        item = FuzzingTreeWidgetItem([
+            str(self.fuzz_finding_count),
+            field_name,
+            payload_name,
+            result,
+            str(response_len)
+        ])
+        
+        # Color-code based on result
+        if 'ABEND' in result:
+            for i in range(5):
+                item.setBackground(i, QColor('#5c1a1a'))  # Dark red
+        elif 'CONNECTION' in result:
+            for i in range(5):
+                item.setBackground(i, QColor('#5c3d1a'))  # Dark orange
+        elif 'ERROR' in result:
+            for i in range(5):
+                item.setBackground(i, QColor('#5c5c1a'))  # Dark yellow
+        
+        self.fuzz_findings_tree.addTopLevelItem(item)
+        self.fuzz_findings_tree.scrollToItem(item)
+    
+    def _fuzz_complete(self, message=None):
+        """Complete the fuzzing process."""
+        self.fuzz_running = False
+        self.fuzz_paused = False
+        
+        if self.fuzz_timer:
+            self.fuzz_timer.stop()
+            self.fuzz_timer = None
+        
+        # Update UI state
+        self.fuzz_start_btn.setEnabled(True)
+        self.fuzz_stop_btn.setEnabled(False)
+        self.fuzz_pause_btn.setEnabled(False)
+        self.fuzz_resume_btn.setEnabled(False)
+        self.fuzz_discover_btn.setEnabled(True)
+        
+        if message:
+            self.fuzz_status_label.setText(message)
+        else:
+            self.fuzz_status_label.setText(f"Complete - {self.fuzz_finding_count} findings")
+        
+        self.fuzz_status_label.setProperty("class", "status-success" if self.fuzz_finding_count == 0 else "status-warning")
+        self.fuzz_status_label.style().unpolish(self.fuzz_status_label)
+        self.fuzz_status_label.style().polish(self.fuzz_status_label)
+    
+    def on_fuzz_stop(self):
+        """Handle Stop button click."""
+        self._fuzz_complete("Stopped by user")
+    
+    def on_fuzz_pause(self):
+        """Handle Pause button click."""
+        self.fuzz_paused = True
+        self.fuzz_pause_btn.setEnabled(False)
+        self.fuzz_resume_btn.setEnabled(True)
+        self.fuzz_status_label.setText("Paused")
+    
+    def on_fuzz_resume(self):
+        """Handle Resume button click."""
+        self.fuzz_paused = False
+        self.fuzz_pause_btn.setEnabled(True)
+        self.fuzz_resume_btn.setEnabled(False)
+        self.fuzz_status_label.setText("Fuzzing...")
+    
+    def on_fuzz_clear_findings(self):
+        """Clear all findings."""
+        self.fuzz_findings_tree.clear()
+        self.fuzz_finding_count = 0
+    
+    def on_fuzz_export(self):
+        """Export findings to CSV."""
+        if self.fuzz_findings_tree.topLevelItemCount() == 0:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "No Findings", "No findings to export.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Findings", "fuzz_findings.csv", "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["#", "Field", "Payload", "Result", "Response Length"])
+                    
+                    for i in range(self.fuzz_findings_tree.topLevelItemCount()):
+                        item = self.fuzz_findings_tree.topLevelItem(i)
+                        writer.writerow([item.text(j) for j in range(5)])
+                
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Export Complete", 
+                    f"Exported {self.fuzz_findings_tree.topLevelItemCount()} findings to {filename}")
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "Export Failed", f"Error: {str(e)}")
+    
+    # =========================================================================
+    # Order Fuzzing Tab Handlers
+    # =========================================================================
+    
+    def order_set_all_payloads(self, checked):
+        """Set all order payload checkboxes to the given state."""
+        for cb in self.order_payloads.values():
+            cb.setChecked(checked)
+    
+    def on_order_fuzz_start(self):
+        """Handle Start button click for Order Fuzzing tab."""
+        from PySide6.QtWidgets import QMessageBox
+        
+        # Show warning dialog
+        warning = QMessageBox()
+        warning.setIcon(QMessageBox.Icon.Warning)
+        warning.setWindowTitle("⚠️ DANGER: Order Fuzzing Warning")
+        warning.setText(
+            "<b>WARNING: Order Fuzzing can crash the target system!</b>"
+        )
+        warning.setInformativeText(
+            "Order fuzzing injects malformed TN3270 protocol data. This can cause:\n\n"
+            "• Protocol parser crashes\n"
+            "• Terminal disconnection\n"
+            "• System instability\n\n"
+            "ONLY run this on test/development systems!\n\n"
+            "By clicking 'I Understand', you confirm that:\n"
+            "1. This is NOT a production system\n"
+            "2. You have PERMISSION to test this system\n"
+            "3. You accept responsibility for any consequences"
+        )
+        
+        understand_btn = warning.addButton("I understand and have permission!", QMessageBox.ButtonRole.AcceptRole)
+        warning.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        
+        warning.exec()
+        
+        if warning.clickedButton() != understand_btn:
+            return
+        
+        # Validate at least one order type is selected
+        selected_orders = [k for k, cb in self.order_payloads.items() if cb.isChecked()]
+        if not selected_orders:
+            QMessageBox.warning(self, "No Orders Selected", 
+                "Please select at least one order injection type.")
+            return
+        
+        # Start order fuzzing
+        self._start_order_fuzzing(selected_orders)
+    
+    def _start_order_fuzzing(self, order_types):
+        """Initialize and start the order fuzzing process."""
+        self.order_running = True
+        self.order_paused = False
+        self.order_finding_count = 0
+        
+        # Update UI state
+        self.order_start_btn.setEnabled(False)
+        self.order_stop_btn.setEnabled(True)
+        self.order_pause_btn.setEnabled(True)
+        self.order_resume_btn.setEnabled(False)
+        self.order_status_label.setText("Initializing...")
+        
+        # Generate order payloads
+        self.order_current_payloads = self._generate_order_payloads(order_types)
+        self.order_current_index = 0
+        
+        total = len(self.order_current_payloads)
+        self.order_progress_label.setText(f"0 / {total}")
+        self.order_status_label.setText("Fuzzing...")
+        self.order_status_label.setProperty("class", "status-info")
+        self.order_status_label.style().unpolish(self.order_status_label)
+        self.order_status_label.style().polish(self.order_status_label)
+        
+        # Get delay
+        try:
+            delay_ms = int(self.order_delay_input.text())
+        except ValueError:
+            delay_ms = 300
+        
+        # Start timer for fuzzing iterations
+        self.order_timer = QTimer()
+        self.order_timer.timeout.connect(self._order_fuzz_iteration)
+        self.order_timer.start(delay_ms)
+    
+    def _generate_order_payloads(self, order_types):
+        """Generate order injection payloads."""
+        payloads = []
+        
+        order_bytes = {
+            'sba': 0x11, 'sf': 0x1D, 'sfe': 0x29, 'sa': 0x28,
+            'mf': 0x2C, 'ra': 0x3C, 'eua': 0x12, 'ic': 0x13,
+            'pt': 0x05, 'ge': 0x08,
+        }
+        
+        for order_type in order_types:
+            if order_type in order_bytes:
+                ob = order_bytes[order_type]
+                # Repeated order bytes
+                payloads.append({'type': order_type, 'data': bytes([ob] * 4), 'name': f'{order_type.upper()}-x4', 'is_binary': True})
+                payloads.append({'type': order_type, 'data': bytes([ob] * 16), 'name': f'{order_type.upper()}-x16', 'is_binary': True})
+            elif order_type == 'telnet_iac':
+                payloads.append({'type': 'telnet', 'data': bytes([0xFF, 0xEF]), 'name': 'IAC-EOR', 'is_binary': True})
+                payloads.append({'type': 'telnet', 'data': bytes([0xFF, 0xF0]), 'name': 'IAC-SE', 'is_binary': True})
+                payloads.append({'type': 'telnet', 'data': bytes([0xFF, 0xFF, 0xFF, 0xFF]), 'name': 'IAC-FLOOD', 'is_binary': True})
+            elif order_type == 'attr_bytes':
+                for attr in [0x00, 0x20, 0x28, 0x2C, 0x0C, 0x30, 0x3C]:
+                    payloads.append({'type': 'attr', 'data': bytes([0x1D, attr] * 4), 'name': f'SF-ATTR-{attr:02X}', 'is_binary': True})
+            elif order_type == 'ext_attrs':
+                payloads.append({'type': 'ext', 'data': bytes([0x29, 0x02, 0xC0, 0x00]), 'name': 'SFE-EXT-ATTR', 'is_binary': True})
+                payloads.append({'type': 'ext', 'data': bytes([0x29, 0x03, 0x41, 0xF1, 0x42, 0xF4]), 'name': 'SFE-COLOR', 'is_binary': True})
+            elif order_type == 'random_orders':
+                import random
+                for i in range(5):
+                    data = bytes([random.choice([0x11, 0x1D, 0x29, 0x28, 0x2C, 0x3C]) for _ in range(8)])
+                    payloads.append({'type': 'random', 'data': data, 'name': f'RANDOM-{i+1}', 'is_binary': True})
+        
+        return payloads
+    
+    def _order_fuzz_iteration(self):
+        """Execute one order fuzzing iteration."""
+        if not self.order_running or self.order_paused:
+            return
+        
+        if self.order_current_index >= len(self.order_current_payloads):
+            self._order_fuzz_complete()
+            return
+        
+        payload = self.order_current_payloads[self.order_current_index]
+        
+        try:
+            # Build and send the order fuzz packet
+            self._send_order_fuzz_packet(payload)
+            
+            # Check response
+            import time
+            time.sleep(0.1)
+            response = self.hack3270.get_last_server()
+            response_len = len(self.hack3270.get_last_server_raw() or b'')
+            
+            # Check for abend
+            abend = None
+            response_upper = response.upper() if response else ''
+            abend_patterns = ['DFHAC2', 'ABEND', 'ASRA', 'AICA', 'AEY7', 'APCT',
+                              'SOC7', 'SOC4', 'S0C7', 'S0C4', 'ASRB', 'AEXL']
+            for pattern in abend_patterns:
+                if pattern in response_upper:
+                    abend = pattern
+                    break
+            
+            if abend:
+                self._add_order_finding(payload, 'ABEND: ' + abend, response_len)
+                if self.order_stop_on_abend.isChecked():
+                    self._order_fuzz_complete(f"Stopped: ABEND {abend} detected")
+                    return
+            
+        except Exception as e:
+            error_str = str(e)
+            if 'WinError 10053' in error_str or 'Connection' in error_str:
+                self._add_order_finding(payload, 'CONNECTION LOST', 0)
+                if self.order_stop_on_disconnect.isChecked():
+                    self._order_fuzz_complete("Stopped: Connection lost")
+                    return
+            else:
+                self._add_order_finding(payload, f'ERROR: {error_str}', 0)
+        
+        # Update progress
+        self.order_current_index += 1
+        total = len(self.order_current_payloads)
+        self.order_progress_label.setText(f"{self.order_current_index} / {total}")
+    
+    def _send_order_fuzz_packet(self, payload):
+        """Send an order fuzzing packet."""
+        data = payload['data']
+        name = payload['name']
+        
+        AID_ENTER = 0x7D
+        SBA = 0x11
+        
+        # Check for TN3270E mode
+        header = b''
+        if hasattr(self.hack3270, 'check_inject_3270e') and self.hack3270.check_inject_3270e():
+            header = b'\x00\x00\x00\x00\x01'
+        
+        cursor_addr = bytes([0x40, 0x40])  # Position 0
+        packet = header + bytes([AID_ENTER, SBA]) + cursor_addr + data
+        
+        desc = f'Fuzz: Order/{name}'
+        self.hack3270.api_send_raw(packet, desc)
+    
+    def _add_order_finding(self, payload, result, response_len):
+        """Add a finding to the order findings tree."""
+        self.order_finding_count += 1
+        
+        order_type = payload['type'].upper()
+        payload_name = payload['name']
+        
+        item = FuzzingTreeWidgetItem([
+            str(self.order_finding_count),
+            order_type,
+            payload_name,
+            result,
+            str(response_len)
+        ])
+        
+        # Color-code based on result
+        if 'ABEND' in result:
+            for i in range(5):
+                item.setBackground(i, QColor('#5c1a1a'))
+        elif 'CONNECTION' in result:
+            for i in range(5):
+                item.setBackground(i, QColor('#5c3d1a'))
+        elif 'ERROR' in result:
+            for i in range(5):
+                item.setBackground(i, QColor('#5c5c1a'))
+        
+        self.order_findings_tree.addTopLevelItem(item)
+        self.order_findings_tree.scrollToItem(item)
+    
+    def _order_fuzz_complete(self, message=None):
+        """Complete the order fuzzing process."""
+        self.order_running = False
+        self.order_paused = False
+        
+        if self.order_timer:
+            self.order_timer.stop()
+            self.order_timer = None
+        
+        self.order_start_btn.setEnabled(True)
+        self.order_stop_btn.setEnabled(False)
+        self.order_pause_btn.setEnabled(False)
+        self.order_resume_btn.setEnabled(False)
+        
+        if message:
+            self.order_status_label.setText(message)
+        else:
+            self.order_status_label.setText(f"Complete - {self.order_finding_count} findings")
+        
+        self.order_status_label.setProperty("class", "status-success" if self.order_finding_count == 0 else "status-warning")
+        self.order_status_label.style().unpolish(self.order_status_label)
+        self.order_status_label.style().polish(self.order_status_label)
+    
+    def on_order_fuzz_stop(self):
+        """Handle Stop button click for Order Fuzzing."""
+        self._order_fuzz_complete("Stopped by user")
+    
+    def on_order_fuzz_pause(self):
+        """Handle Pause button click for Order Fuzzing."""
+        self.order_paused = True
+        self.order_pause_btn.setEnabled(False)
+        self.order_resume_btn.setEnabled(True)
+        self.order_status_label.setText("Paused")
+    
+    def on_order_fuzz_resume(self):
+        """Handle Resume button click for Order Fuzzing."""
+        self.order_paused = False
+        self.order_pause_btn.setEnabled(True)
+        self.order_resume_btn.setEnabled(False)
+        self.order_status_label.setText("Fuzzing...")
+    
+    def on_order_clear_findings(self):
+        """Clear all order findings."""
+        self.order_findings_tree.clear()
+        self.order_finding_count = 0
+    
+    def on_order_export(self):
+        """Export order findings to CSV."""
+        if self.order_findings_tree.topLevelItemCount() == 0:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "No Findings", "No findings to export.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Findings", "order_fuzz_findings.csv", "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["#", "Order", "Payload", "Result", "Response Length"])
+                    
+                    for i in range(self.order_findings_tree.topLevelItemCount()):
+                        item = self.order_findings_tree.topLevelItem(i)
+                        writer.writerow([item.text(j) for j in range(5)])
+                
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Export Complete", 
+                    f"Exported {self.order_findings_tree.topLevelItemCount()} findings to {filename}")
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "Export Failed", f"Error: {str(e)}")
 
     def set_checkbox_values(self):
         self.hack3270.set_hack_prot(1 if self.hack_prot_cb.isChecked() else 0)

@@ -88,7 +88,8 @@ def run_test(api, name, injection_bytes, use_field=True):
     
     try:
         packet = build_injection_packet(api, injection_bytes, use_field)
-        api.send_raw(packet)
+        desc = f'Fuzz: Order/{name}'
+        api.send_raw(packet, desc)
         time.sleep(DELAY)
         
         response = api.get_last_server()

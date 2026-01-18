@@ -209,7 +209,8 @@ def main():
                     if show_debug:
                         print(f"    [DEBUG] Sending packet...")
                     
-                    api.send_raw(packet)
+                    desc = f'Fuzz: Field_{field_idx}/{payload_name}'
+                    api.send_raw(packet, desc)
                     time.sleep(DELAY)
                     
                     response = api.get_last_server()

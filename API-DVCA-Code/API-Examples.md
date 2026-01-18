@@ -225,6 +225,57 @@ The supervisor code is **1337**.
 
 ---
 
+### Step 5: Fuzzing
+
+Four fuzzing scripts are provided for vulnerability discovery:
+
+#### `fuzz.py` - Comprehensive CICS Form Fuzzer
+
+Hardcoded field definitions with 35+ payload categories including packed decimal, CICS injection, SQL injection, and TN3270 order injection.
+
+```bash
+python fuzz.py
+```
+
+#### `fuzz2.py` - Dynamic Field Discovery Fuzzer
+
+Automatically discovers input fields on the current screen - no configuration required.
+
+```bash
+python fuzz2.py
+```
+
+#### `fuzz3.py` - Protected/Hidden Field Fuzzer
+
+Tests if the server validates "read-only" data. Can modify protected transaction codes!
+
+```bash
+python fuzz3.py
+```
+
+#### `order_fuzz.py` - TN3270 Protocol Order Injection
+
+Tests protocol-level vulnerabilities in 3270 order handling (SBA, SF, SFE, RA, EUA).
+
+```bash
+python order_fuzz.py
+```
+
+| Script | Field Discovery | Target |
+|--------|-----------------|--------|
+| `fuzz.py` | Hardcoded | Input fields, known forms |
+| `fuzz2.py` | Automatic | Input fields |
+| `fuzz3.py` | Automatic | Protected/hidden fields |
+| `order_fuzz.py` | N/A | TN3270 protocol layer |
+
+**Analysis:** After fuzzing, use the **Analysis tab** in hack3270 to scan for abends and errors, or run:
+
+```bash
+python ../analyze.py pentest.db
+```
+
+---
+
 ## Database Files
 
 Each script may use its own `.db` file to store captured traffic:
@@ -249,6 +300,10 @@ These contain pre-captured packets for replaying login sequences and injection t
 | `aid_scan.py` | Find hidden screens via AID scanning |
 | `brute.py` | Brute force supervisor code (database template) |
 | `brute2.py` | Brute force supervisor code (raw packets) |
+| `fuzz.py` | Comprehensive CICS form fuzzer |
+| `fuzz2.py` | Dynamic field discovery fuzzer |
+| `fuzz3.py` | Protected/hidden field fuzzer |
+| `order_fuzz.py` | TN3270 protocol order injection |
 
 ---
 

@@ -303,9 +303,18 @@ class Hack3270API:
             self._is_tn3270e = (resp == 'TRUE')
         return self._is_tn3270e
     
-    def send_raw(self, data):
-        """Send raw bytes to the server."""
-        header = f"SEND_RAW:{len(data)}\n"
+    def send_raw(self, data, description=None):
+        """
+        Send raw bytes to the server.
+        
+        Args:
+            data: Raw bytes to send
+            description: Optional log description (default: 'API: Send raw data')
+        """
+        if description:
+            header = f"SEND_RAW:{len(data)}:{description}\n"
+        else:
+            header = f"SEND_RAW:{len(data)}\n"
         self._sock.sendall(header.encode('utf-8') + data)
         resp = self._recv()
         if self._recording:
@@ -339,7 +348,7 @@ class Hack3270API:
             packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
         else:
             packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
-        return self.send_raw(packet)
+        return self.send_raw(packet, f'API: Send field "{text[:20]}..."' if len(text) > 20 else f'API: Send field "{text}"')
     
     def send_command(self, text, cursor_addr=None):
         """
@@ -366,7 +375,7 @@ class Hack3270API:
             packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
         else:
             packet = bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
-        return self.send_raw(packet)
+        return self.send_raw(packet, f'API: Send command "{text}"')
     
     def send_client_data(self, log_id):
         """Replay client data from a log entry."""
@@ -375,7 +384,7 @@ class Hack3270API:
             raise Hack3270APIError(f"Log {log_id} not found")
         if self._recording:
             self._recorded.append(('LOG', log_id))
-        return self.send_raw(raw)
+        return self.send_raw(raw, f'API: Replay client data (ID {log_id})')
     
     def analyze_hidden(self):
         """Analyze last server response for hidden fields."""
@@ -632,7 +641,7 @@ class Hack3270API:
                 ebcdic += bytes([0x40] * (mask_len - len(ebcdic)))
         
         packet = preamble + ebcdic + postamble
-        return self.send_raw(packet)
+        return self.send_raw(packet, f'API: Inject "{value[:20]}..."' if len(value) > 20 else f'API: Inject "{value}"')
     
     # =========================================================================
     # Automation
@@ -684,7 +693,7 @@ class Hack3270API:
             if action_type == 'AID':
                 self.send_aid(data)
             elif action_type == 'RAW':
-                self.send_raw(data)
+                self.send_raw(data, 'API: Playback raw data')
             elif action_type == 'LOG':
                 self.send_client_data(data)
             if delay > 0:

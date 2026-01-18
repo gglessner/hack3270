@@ -281,7 +281,9 @@ def main():
                 
                 try:
                     packet = build_fuzz_packet(api, field, payload_data, is_binary)
-                    api.send_raw(packet)
+                    field_type = 'Hidden' if field['hidden'] else ('Protected' if field['protected'] else 'Input')
+                    desc = f'Fuzz: {field_type}_{field_idx}/{payload_name}'
+                    api.send_raw(packet, desc)
                     time.sleep(DELAY)
                     
                     response = api.get_last_server()

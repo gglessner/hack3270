@@ -7,7 +7,7 @@ used to test 3270 based applications. This object manages the logging
 database, connectivity and tracking state of the connections. There is no user
 interface provided by this class, the example UI is included in tk.py
 """
-__version__ = '2.4.5'
+__version__ = '2.5.0'
 __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 __name__ = "hack3270"
@@ -971,7 +971,8 @@ class hack3270:
     def _handle_api_send_raw(self, client_socket, data):
         '''
         Handle SEND_RAW command - send raw bytes to the mainframe server.
-        Format: SEND_RAW:<length>\n<binary_data>
+        Format: SEND_RAW:<length>[:<description>]\n<binary_data>
+        The description is optional and used for logging.
         '''
         try:
             # Find the header end (first newline)
@@ -983,12 +984,16 @@ class hack3270:
             header = data[:header_end].decode('utf-8')
             raw_data = data[header_end + 1:]
             
-            # Parse expected length
+            # Parse header parts: SEND_RAW:<length>[:<description>]
+            header_parts = header.split(':', 2)  # Split into at most 3 parts
             try:
-                expected_len = int(header.split(':')[1])
+                expected_len = int(header_parts[1])
             except (IndexError, ValueError):
                 client_socket.send(b"ERROR: Invalid SEND_RAW header\n")
                 return
+            
+            # Get optional description, default to generic message
+            log_description = header_parts[2] if len(header_parts) > 2 else 'API: Send raw data'
             
             # Verify we have all the data
             if len(raw_data) != expected_len:
@@ -997,7 +1002,7 @@ class hack3270:
             
             # Send to the mainframe server
             if self.server:
-                self.write_database_log('C', 'API: Replay client data', raw_data)
+                self.write_database_log('C', log_description, raw_data)
                 self.server.send(raw_data)
                 client_socket.send(f"OK: Sent {len(raw_data)} bytes to server\n".encode('utf-8'))
                 self.logger.debug(f"API: Sent {len(raw_data)} bytes to server")
@@ -1475,6 +1480,40 @@ class hack3270:
     def send_client(self, data):
         self.logger.debug("Sending Data to client: {}".format(data.hex()))
         self.client.send(data)
+    
+    def api_send_raw(self, data, description=None):
+        '''
+        Send raw bytes to the mainframe server (for GUI/internal use).
+        Logs the transmission with optional description.
+        
+        Args:
+            data: Raw bytes to send (should include IAC EOR if needed)
+            description: Optional description for the log entry
+        '''
+        if self.server is None:
+            raise Exception("No server connection")
+        
+        # Append IAC EOR if not present
+        if not data.endswith(b'\xff\xef'):
+            data = data + b'\xff\xef'
+        
+        # Log the transmission
+        note = description if description else 'GUI: Fuzz packet'
+        self.write_database_log('C', note, data)
+        
+        # Send to server
+        self.server.send(data)
+        self.logger.debug(f"GUI API: Sent {len(data)} bytes to server")
+    
+    def get_last_server_raw(self):
+        '''Get the last server response as raw bytes (for GUI/internal use).'''
+        return self.server_data if self.server_data else b''
+    
+    def get_last_server(self):
+        '''Get the last server response converted to ASCII (for GUI/internal use).'''
+        if self.server_data and len(self.server_data) > 0:
+            return self.get_ascii(self.server_data)
+        return ''
     ####
 
     def expand_CS(self, text):

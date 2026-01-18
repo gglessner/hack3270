@@ -336,14 +336,21 @@ api.send_aid('0x7d')  # ENTER as hex
 
 **Raises:** `Hack3270APIError` if AID not recognized
 
-### `send_raw(data)`
+### `send_raw(data, description=None)`
 
 Send raw bytes directly to the mainframe.
+
+**Parameters:**
+- `data` - Raw bytes to send
+- `description` - Optional log description for the Logs tab (default: 'API: Send raw data')
 
 ```python
 # Send raw EBCDIC data
 raw_data = api.ascii_to_ebcdic('LOGON MYUSER')
 api.send_raw(raw_data)
+
+# Send with custom log description
+api.send_raw(packet, 'Fuzz: Address/Overflow')
 ```
 
 **Returns:** `str` - API response
@@ -845,7 +852,7 @@ The TCP API uses simple text commands on port 31337:
 | `GET_LAST_SERVER` | Get ASCII screen |
 | `GET_LAST_SERVER_RAW` | Get raw bytes (base64 JSON) |
 | `SEND_AID:<aid>` | Send AID key |
-| `SEND_RAW:<len>\n<data>` | Send raw bytes |
+| `SEND_RAW:<len>[:<desc>]\n<data>` | Send raw bytes with optional log description |
 | `ANALYZE_HIDDEN` | Analyze hidden fields (JSON) |
 | `GET_INJECT_TEMPLATE:<id>:<mask>` | Get injection template (JSON) |
 

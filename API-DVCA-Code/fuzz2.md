@@ -226,6 +226,7 @@ except socket.error as e:
 | `check_abend()` | Detect mainframe errors |
 | `is_tn3270e()` | Check for TN3270E mode |
 | `ascii_to_ebcdic()` | Convert text payloads |
+| `send_raw(data, desc)` | Send packet with log description |
 
 ## Comparison: fuzz.py vs fuzz2.py
 

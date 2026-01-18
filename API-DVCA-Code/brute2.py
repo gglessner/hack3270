@@ -91,7 +91,8 @@ def main():
         for i, code in enumerate(codes, 1):
             # Build and send packet
             packet = build_code_packet(api, code)
-            api.send_raw(packet)
+            desc = f'Brute: code {code}'
+            api.send_raw(packet, desc)
             time.sleep(DELAY)
             
             # Check response

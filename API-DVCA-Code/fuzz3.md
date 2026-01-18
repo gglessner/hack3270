@@ -239,6 +239,7 @@ This is critical because:
 | `is_tn3270e()` | Check protocol mode |
 | `ascii_to_ebcdic()` | Convert text payloads |
 | `ebcdic_to_ascii()` | Display field values |
+| `send_raw(data, desc)` | Send packet with log description |
 
 ## Security Implications
 
@@ -294,7 +295,7 @@ packet = api.build_raw_packet(
     cursor_addr=1,
     field_addr=1
 )
-api.send_raw(packet)
+api.send_raw(packet, 'Exploit: protected field injection')
 
 # Result: TSO READY prompt instead of CICS application
 ```

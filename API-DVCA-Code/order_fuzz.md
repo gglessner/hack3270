@@ -262,7 +262,7 @@ Total tests: 97
 | `is_tn3270e()` | Check protocol mode |
 | `check_abend()` | Detect mainframe errors |
 | `test_connection()` | Verify connection is alive |
-| `send_raw()` | Send injection packet |
+| `send_raw(data, desc)` | Send injection packet with log description |
 
 ## Findings Interpretation
 

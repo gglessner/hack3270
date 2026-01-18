@@ -2,6 +2,75 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.5.0 Changelog
+
+### New Fuzzing Tabs
+Two comprehensive fuzzing tabs have been added to the GUI between AID Spoofing and Logs:
+
+#### Field Fuzzing Tab
+- **Redesigned Layout**: Left panel for discovered fields (full height), right panel for controls and findings
+- **Field Discovery**: Automatically discovers input, protected, and hidden fields from the current screen
+- **Field Value Display**: Shows current EBCDIC→ASCII converted values for each discovered field
+- **Field Selection**: All/None buttons to quickly select/deselect fields for fuzzing
+- **Configurable Payload Categories** (default unchecked for safety):
+  - Buffer Overflow
+  - Packed Decimal (COMP-3)
+  - Zoned Decimal
+  - Date/Time Edge Cases
+  - EBCDIC Control Characters
+  - CICS Transaction Injection
+  - SQL/DB2 Injection
+  - COBOL Special Values (LOW-VALUES, HIGH-VALUES)
+  - Random Binary
+  - Boundary Testing
+
+#### Order Fuzzing Tab
+- **TN3270 Protocol Order Injection**: Tests SBA, SF, SFE, RA, EUA, IC, PT, GE order handling
+- **Extended Payloads**: Invalid addresses, nested orders, Telnet escapes, random sequences
+- **Separate Interface**: Dedicated tab for protocol-level fuzzing
+
+#### Common Features
+- **Safety Controls**: Dual confirmation warning ("I understand and have permission!")
+- **Real-time Monitoring**: Stop on ABEND detection, stop on connection loss
+- **Controls**: Start, Stop, Pause, Resume with progress display
+- **Findings Table**: Color-coded results (red=ABEND, orange=warning, yellow=error)
+- **Numeric Sorting**: Findings tables sort numerically by # and Response Length columns
+- **CSV Export**: Export findings to CSV file
+
+#### New Internal Methods
+- `api_send_raw(data, description)` - Direct packet sending from GUI
+- `get_last_server_raw()` - Get raw server response bytes
+- `get_last_server()` - Get ASCII-converted server response
+
+---
+
+## Version 2.4.6 Changelog
+
+### Improved Logging Descriptions
+- `send_raw()` now accepts optional `description` parameter for custom log messages
+- `send_field()` logs as `API: Send field "text"`
+- `send_command()` logs as `API: Send command "text"`
+- `send_client_data()` logs as `API: Replay client data (ID X)`
+- `inject()` logs as `API: Inject "value"`
+
+### Standardized Fuzzing Log Format
+- All fuzzers now use consistent `Fuzz: target/payload` format
+- Enables unified analysis across fuzz.py, fuzz2.py, fuzz3.py, order_fuzz.py
+- Brute force scripts use `Brute: value` format
+
+### Analysis Tab Enhancements
+- New "Fuzz" detection type for API fuzzing results
+- Automatically detects abends (SOC7, ASRA, APCT, AICA, etc.) in fuzzing responses
+- Detects error patterns (NOT FOUND, UNDEFINED, UNKNOWN TRANSACTION)
+- Status shows fuzz abend and error counts
+
+### Standalone Analysis Script (`analyze.py`)
+- Added `analyze_fuzzing()` function for processing Fuzz:/Brute: entries
+- Groups fuzzing by timing sequences
+- Reports abends, errors, and length anomalies
+
+---
+
 ## Version 2.4.5 Changelog
 
 ### New API Functions for Screen Parsing

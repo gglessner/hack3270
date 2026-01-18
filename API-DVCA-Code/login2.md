@@ -81,7 +81,7 @@ def send_field(self, text, cursor_addr, field_addr, add_space=False):
     
     packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + \
              field_addr + ebcdic_text + IAC_EOR
-    return self.send_raw(packet)
+    return self.send_raw(packet, f'API: Send field "{text}"')
 ```
 
 ### The send_command() API Function

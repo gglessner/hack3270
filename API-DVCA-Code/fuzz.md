@@ -236,6 +236,16 @@ Common vulnerabilities detected:
 | TN3270 Orders | Crash | Protocol parsing vulnerability |
 | SQL Injection | None | May still work silently |
 
+## API Functions Used
+
+| Function | Purpose |
+|----------|---------|
+| `is_tn3270e()` | Check for TN3270E mode |
+| `encode_buffer_address()` | Convert position to bytes |
+| `ascii_to_ebcdic()` | Convert text payloads |
+| `check_abend()` | Detect mainframe errors |
+| `send_raw(data, desc)` | Send packet with log description |
+
 ## See Also
 
 - `fuzz2.py` - Dynamic field discovery fuzzer

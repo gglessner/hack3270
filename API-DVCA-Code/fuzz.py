@@ -591,7 +591,8 @@ def run_payload_phase(api, phase_name, field_idx, field_name, payloads, tested, 
         
         try:
             packet = build_fuzz_packet(api, field_idx, payload, is_binary)
-            api.send_raw(packet)
+            desc = f'Fuzz: {field_name}/{name}'
+            api.send_raw(packet, desc)
             time.sleep(DELAY)
             
             response = api.get_last_server()
