@@ -362,6 +362,7 @@ class Hack3270API:
             API response string
         """
         AID_ENTER = 0x7D
+        SBA = 0x11
         IAC_EOR = bytes([0xFF, 0xEF])
         TN3270E_HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x01])
         
@@ -371,10 +372,11 @@ class Hack3270API:
         ebcdic_text = self.ascii_to_ebcdic(text)
         
         # Build packet with TN3270E header if needed
+        # Include SBA order for IBM mainframe compatibility
         if self.is_tn3270e():
-            packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
+            packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + cursor_addr + ebcdic_text + IAC_EOR
         else:
-            packet = bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
+            packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + cursor_addr + ebcdic_text + IAC_EOR
         return self.send_raw(packet, f'API: Send command "{text}"')
     
     def send_client_data(self, log_id):

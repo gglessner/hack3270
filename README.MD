@@ -2,6 +2,16 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.5.2 Changelog
+
+### API Bug Fixes
+- **Fixed `send_command()` for IBM mainframes**: Added SBA (Set Buffer Address) order to packet structure for TN3270E compatibility. The function now works correctly on both TK4 emulators and real IBM mainframes.
+
+### GUI Improvements
+- **Field Fuzzing tab layout**: Added width constraints to Options (max 300px) and Controls (max 400px) boxes for better visual balance
+
+---
+
 ## Version 2.5.1 Changelog
 
 ### Redesigned Statistics Tab
