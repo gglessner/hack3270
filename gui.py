@@ -858,6 +858,7 @@ class Hack3270GUI(QMainWindow):
         options_layout.addWidget(self.fuzz_stop_on_disconnect)
         options_layout.addStretch()
         options_group.setLayout(options_layout)
+        options_group.setMaximumWidth(300)
         top_row.addWidget(options_group)
         
         # Controls
@@ -899,6 +900,7 @@ class Hack3270GUI(QMainWindow):
         controls_layout.addLayout(button_layout)
         controls_layout.addStretch()
         controls_group.setLayout(controls_layout)
+        controls_group.setMaximumWidth(400)
         top_row.addWidget(controls_group)
         
         right_layout.addLayout(top_row)
