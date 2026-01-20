@@ -2,6 +2,47 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.5.1 Changelog
+
+### Redesigned Statistics Tab
+Complete overhaul of the Statistics tab with a 3x3 grid layout providing comprehensive session metrics:
+
+#### Connection & Traffic
+- Server address, TLS status, protocol mode
+- TCP sessions, session duration
+- Server/client message and byte counts
+- Average response/request sizes
+
+#### Hack Operations & Hidden Fields
+- Field hack and color hack enable counts
+- Hack toggle events, TN3270 negotiations
+- Hidden fields detected and fields with data
+- Screens containing hidden fields
+
+#### AID & Field Injection
+- Inject Keys tab usage
+- AID Spoofing (manual mode) count
+- AID Fuzzer test count
+- API: Send AID, Send Field, Send Command counts
+- Mask captures, replay operations
+- Total injection counts
+
+#### Fuzzing Activity & Results
+- Field fuzzing and order fuzzing test counts
+- Brute force attempts
+- GUI fuzz packets sent
+- ABENDs triggered, errors detected
+- Unique crash payloads, ABEND rate
+- Top ABEND causes summary
+
+### Window Height Fixes
+- Fixed issue where switching from taller tabs wouldn't reset window height
+- All tabs now properly resize to their correct height
+- Logs, Analysis, and Statistics tabs share the same unified height
+- Field Fuzzing and Order Fuzzing tabs share the same height (700px)
+
+---
+
 ## Version 2.5.0 Changelog
 
 ### New Fuzzing Tabs

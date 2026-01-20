@@ -305,9 +305,8 @@ class Hack3270GUI(QMainWindow):
         self.tab2_height = 250   # Tab 2: Inject Key Presses
         self.tab3_height = 180   # Tab 3: AID Spoofing
         self.tab4_height = 700   # Tab 4: Field Fuzzing
-        self.tab5_height = 700   # Tab 5: Order Fuzzing
-        self.tab8_height = 425   # Tab 8: Statistics
-        self.tall_height = 525   # Tabs 6, 7 & 9: Logs, Analysis, Help
+        self.tab5_height = 700   # Tab 5: Order Fuzzing (same as Field Fuzzing)
+        self.tall_height = 525   # Tabs 6, 7, 9: Logs, Analysis, Help (Statistics uses tall_height + 100)
         self.user_tall_height = self.tall_height  # Remember user's preferred tall height
         
         # Central widget
@@ -357,12 +356,12 @@ class Hack3270GUI(QMainWindow):
         self.on_tab_changed(self.tabs.currentIndex())
         
     def on_tab_changed(self, index):
-        """Keep full width, minimize height on compact tabs, restore tall on Logs/Analysis/Help"""
+        """Resize window height based on tab - each tab has its own height"""
         # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing, 
         #              4=Field Fuzzing, 5=Order Fuzzing, 6=Logs, 7=Analysis, 8=Statistics, 9=Help
         
-        # Save tall height when leaving tall tabs (Logs, Analysis, Help)
-        if self.last_tab_index in [6, 7, 9]:
+        # Save tall height when leaving Help tab (only Help uses user-resizable height)
+        if self.last_tab_index == 9:
             self.user_tall_height = self.height()
         
         # Handle height - each tab has its own height
@@ -378,10 +377,7 @@ class Hack3270GUI(QMainWindow):
             self.resize(self.screen_width, self.tab4_height)
         elif index == 5:  # Order Fuzzing
             self.resize(self.screen_width, self.tab5_height)
-        elif index == 8:  # Statistics
-            self.resize(self.screen_width, self.tab8_height)
-        
-        elif index in [6, 7, 9]:  # Logs, Analysis, or Help
+        elif index in [6, 7, 8]:  # Logs, Analysis, Statistics - same fixed height
             if index == 6:  # Logs
                 self.update_logs_tab()
                 # Scroll to last item on first visit to Logs tab
@@ -391,9 +387,10 @@ class Hack3270GUI(QMainWindow):
                     last_item = self.log_tree.topLevelItem(self.log_tree.topLevelItemCount() - 1)
                     self.log_tree.setCurrentItem(last_item)
                     self.log_tree.scrollToItem(last_item, QTreeWidget.PositionAtBottom)
-            target_height = max(self.user_tall_height, 500)
-            if self.height() < target_height:
-                self.resize(self.screen_width, target_height)
+            self.resize(self.screen_width, self.tall_height + 100)
+        elif index == 9:  # Help - use user's preferred tall height
+            target_height = max(self.user_tall_height, self.tall_height)
+            self.resize(self.screen_width, target_height)
         
         self.last_tab_index = index
         
@@ -1207,74 +1204,428 @@ class Hack3270GUI(QMainWindow):
     def create_statistics_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
         
-        # Stats group
-        stats_group = QGroupBox("Session Statistics")
-        stats_layout = QGridLayout(stats_group)
-        stats_layout.setSpacing(10)
+        # Refresh button at top
+        top_layout = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh Statistics")
+        refresh_btn.setProperty("class", "success")
+        refresh_btn.clicked.connect(self.refresh_statistics)
+        top_layout.addWidget(refresh_btn)
+        self.stats_status_label = QLabel("Ready")
+        top_layout.addWidget(self.stats_status_label)
+        top_layout.addStretch()
+        layout.addLayout(top_layout)
         
-        ip, port = self.hack3270.get_ip_port()
+        # Scroll area for all stats
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setSpacing(10)
         
-        # Calculate statistics
-        total_connections = 0
-        total_time = 0.0
-        last_timestamp = 0.0
-        start_timestamp = 0.0
-        total_injections = 0
-        total_hacks = 0
+        # Main grid for stats groups (3x3)
+        main_grid = QGridLayout()
+        main_grid.setSpacing(10)
+        
+        # Store labels for refresh
+        self.stats_labels = {}
+        
+        # === Row 0: Connection | Traffic | Hack Operations ===
+        conn_group = QGroupBox("Connection")
+        conn_layout = QGridLayout(conn_group)
+        conn_layout.setSpacing(5)
+        self._add_stat_row(conn_layout, 0, "Server:", "stats_server", "---")
+        self._add_stat_row(conn_layout, 1, "TLS:", "stats_tls", "---")
+        self._add_stat_row(conn_layout, 2, "Protocol:", "stats_protocol", "---")
+        self._add_stat_row(conn_layout, 3, "TCP Sessions:", "stats_sessions", "0")
+        self._add_stat_row(conn_layout, 4, "Session Time:", "stats_time", "00:00:00")
+        main_grid.addWidget(conn_group, 0, 0)
+        
+        traffic_group = QGroupBox("Traffic")
+        traffic_layout = QGridLayout(traffic_group)
+        traffic_layout.setSpacing(5)
+        self._add_stat_row(traffic_layout, 0, "Server Messages:", "stats_server_msgs", "0")
+        self._add_stat_row(traffic_layout, 1, "Server Bytes:", "stats_server_bytes", "0")
+        self._add_stat_row(traffic_layout, 2, "Client Messages:", "stats_client_msgs", "0")
+        self._add_stat_row(traffic_layout, 3, "Client Bytes:", "stats_client_bytes", "0")
+        self._add_stat_row(traffic_layout, 4, "Avg Resp/Req:", "stats_avg_size", "0B / 0B")
+        main_grid.addWidget(traffic_group, 0, 1)
+        
+        hack_group = QGroupBox("Hack Operations")
+        hack_layout = QGridLayout(hack_group)
+        hack_layout.setSpacing(5)
+        self._add_stat_row(hack_layout, 0, "Field Hacks:", "stats_field_hacks", "0")
+        self._add_stat_row(hack_layout, 1, "Color Hacks:", "stats_color_hacks", "0")
+        self._add_stat_row(hack_layout, 2, "Toggle Events:", "stats_hack_toggles", "0")
+        self._add_stat_row(hack_layout, 3, "TN3270 Negotiations:", "stats_negotiations", "0")
+        main_grid.addWidget(hack_group, 0, 2)
+        
+        # === Row 1: Hidden Fields | AID Injection | Field Injection ===
+        hidden_group = QGroupBox("Hidden Field Analysis")
+        hidden_layout = QGridLayout(hidden_group)
+        hidden_layout.setSpacing(5)
+        self._add_stat_row(hidden_layout, 0, "Fields Detected:", "stats_hidden_detected", "0")
+        self._add_stat_row(hidden_layout, 1, "Fields with Data:", "stats_hidden_with_data", "0")
+        self._add_stat_row(hidden_layout, 2, "Screens w/ Hidden:", "stats_screens_hidden", "0")
+        main_grid.addWidget(hidden_group, 1, 0)
+        
+        aid_group = QGroupBox("AID Injection")
+        aid_layout = QGridLayout(aid_group)
+        aid_layout.setSpacing(5)
+        self._add_stat_row(aid_layout, 0, "Inject Keys Tab:", "stats_inject_keys", "0")
+        self._add_stat_row(aid_layout, 1, "AID Spoofing:", "stats_aid_spoof", "0")
+        self._add_stat_row(aid_layout, 2, "AID Fuzzer:", "stats_aid_fuzz", "0")
+        self._add_stat_row(aid_layout, 3, "API: Send AID:", "stats_api_aid", "0")
+        self._add_stat_row(aid_layout, 4, "Total:", "stats_total_aid", "0")
+        main_grid.addWidget(aid_group, 1, 1)
+        
+        field_group = QGroupBox("Field Injection")
+        field_layout = QGridLayout(field_group)
+        field_layout.setSpacing(5)
+        self._add_stat_row(field_layout, 0, "API: Send Field:", "stats_api_field", "0")
+        self._add_stat_row(field_layout, 1, "API: Send Cmd:", "stats_api_command", "0")
+        self._add_stat_row(field_layout, 2, "API: Replay:", "stats_api_replay", "0")
+        self._add_stat_row(field_layout, 3, "Mask Captures:", "stats_mask_captures", "0")
+        self._add_stat_row(field_layout, 4, "Total:", "stats_total_field", "0")
+        main_grid.addWidget(field_group, 1, 2)
+        
+        # === Row 2: Fuzzing Activity | Fuzzing Results | Top ABEND Causes ===
+        fuzz_act_group = QGroupBox("Fuzzing Activity")
+        fuzz_act_layout = QGridLayout(fuzz_act_group)
+        fuzz_act_layout.setSpacing(5)
+        self._add_stat_row(fuzz_act_layout, 0, "Field Fuzzing:", "stats_fuzz_field", "0")
+        self._add_stat_row(fuzz_act_layout, 1, "Order Fuzzing:", "stats_fuzz_order", "0")
+        self._add_stat_row(fuzz_act_layout, 2, "Brute Force:", "stats_brute", "0")
+        self._add_stat_row(fuzz_act_layout, 3, "GUI Fuzz:", "stats_gui_fuzz", "0")
+        self._add_stat_row(fuzz_act_layout, 4, "Total:", "stats_total_fuzz", "0")
+        main_grid.addWidget(fuzz_act_group, 2, 0)
+        
+        fuzz_res_group = QGroupBox("Fuzzing Results")
+        fuzz_res_layout = QGridLayout(fuzz_res_group)
+        fuzz_res_layout.setSpacing(5)
+        self._add_stat_row(fuzz_res_layout, 0, "ABENDs:", "stats_abends", "0")
+        self._add_stat_row(fuzz_res_layout, 1, "Errors:", "stats_errors", "0")
+        self._add_stat_row(fuzz_res_layout, 2, "Unique Crashes:", "stats_unique_crashes", "0")
+        self._add_stat_row(fuzz_res_layout, 3, "ABEND Rate:", "stats_abend_rate", "0.0%")
+        main_grid.addWidget(fuzz_res_group, 2, 1)
+        
+        abend_group = QGroupBox("Top ABEND Causes")
+        abend_layout = QVBoxLayout(abend_group)
+        self.stats_abend_list = QLabel("Click Refresh")
+        self.stats_abend_list.setWordWrap(True)
+        abend_layout.addWidget(self.stats_abend_list)
+        main_grid.addWidget(abend_group, 2, 2)
+        
+        # Set column stretches for even distribution
+        main_grid.setColumnStretch(0, 1)
+        main_grid.setColumnStretch(1, 1)
+        main_grid.setColumnStretch(2, 1)
+        
+        scroll_layout.addLayout(main_grid)
+        
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, 1)
+        
+        self.tabs.addTab(tab, "Statistics")
+    
+    def _add_stat_row(self, layout, row, label_text, key, default_value):
+        """Helper to add a statistics row with label and value."""
+        lbl = QLabel(label_text)
+        lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        layout.addWidget(lbl, row, 0)
+        
+        val = QLabel(default_value)
+        val.setProperty("class", "status-info")
+        layout.addWidget(val, row, 1)
+        self.stats_labels[key] = val
+    
+    def refresh_statistics(self):
+        """Recalculate all statistics from the database."""
+        import re
+        from collections import defaultdict
+        
+        self.stats_status_label.setText("Calculating...")
+        QApplication.processEvents()
+        
+        # Initialize counters
         server_messages = 0
         server_bytes = 0
         client_messages = 0
         client_bytes = 0
-
-        for record in self.hack3270.all_logs():
-            curr_timestamp = float(record[1])
-            if record[2] == 'C':
-                client_messages += 1
-                client_bytes += record[4]
-            else:
-                server_messages += 1
-                server_bytes += record[4]
-            if record[2] == 'C' and "Send" in record[3]:
-                total_injections += 1
-            if record[2] == 'S' and "ENABLED" in record[3]:
-                total_hacks += 1
-            if record[2] == 'S' and record[4] == 3:
-                total_connections += 1
-                start_timestamp = curr_timestamp
-                if last_timestamp > 0:
-                    total_time += start_timestamp - last_timestamp
-            else:
-                last_timestamp = curr_timestamp
-        total_time += start_timestamp - last_timestamp
-
-        stats = [
-            ("Server IP Address:", str(ip)),
-            ("Server TCP Port:", str(port)),
-            ("TLS Enabled:", str(self.hack3270.get_tls())),
-            ("Total TCP Connections:", str(total_connections)),
-            ("Total Server Messages:", str(server_messages)),
-            ("Total Client Messages:", str(client_messages)),
-            ("Total Server Bytes:", str(server_bytes)),
-            ("Total Client Bytes:", str(client_bytes)),
-            ("Total Hacks:", str(total_hacks)),
-            ("Total Injections:", str(total_injections)),
-            ("Total Connect Time:", self.get_elapsed_time(total_time)),
-        ]
+        negotiations = 0
+        sessions = 0
+        total_time = 0.0
+        last_timestamp = 0.0
+        start_timestamp = 0.0
         
-        for i, (label, value) in enumerate(stats):
-            lbl = QLabel(label)
-            lbl.setProperty("class", "header")
-            lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            stats_layout.addWidget(lbl, i, 0)
-            
-            val = QLabel(value)
-            val.setProperty("class", "status-info")
-            stats_layout.addWidget(val, i, 1)
+        # Hack operations
+        field_hacks_enabled = 0
+        color_hacks_enabled = 0
+        hack_toggles = 0
         
-        layout.addWidget(stats_group)
-        layout.addSpacing(20)
-        self.tabs.addTab(tab, "Statistics")
+        # Hidden fields
+        hidden_detected = 0
+        hidden_with_data = 0
+        screens_with_hidden = set()
+        
+        # AID injection
+        inject_keys = 0
+        aid_spoof = 0
+        aid_fuzz = 0
+        api_aid = 0
+        
+        # Field injection
+        api_field = 0
+        api_command = 0
+        api_replay = 0
+        mask_captures = 0
+        
+        # Fuzzing
+        fuzz_field = 0
+        fuzz_order = 0
+        brute_force = 0
+        gui_fuzz = 0
+        
+        # Results
+        abends = 0
+        errors = 0
+        abend_causes = defaultdict(int)
+        
+        # ABEND patterns (in EBCDIC)
+        ABEND_PATTERNS = ['APCT', 'SOC7', 'ASRA', 'AICA', 'ASRB', 'SOC4', 'AEY9']
+        ERROR_PATTERNS = ['NOT FOUND', 'UNDEFINED', 'UNKNOWN', 'INVALID', 'ERROR']
+        
+        # Process all logs
+        all_logs = list(self.hack3270.all_logs())
+        
+        for i, record in enumerate(all_logs):
+            try:
+                record_id = record[0]
+                timestamp = float(record[1])
+                direction = record[2]
+                notes = record[3] if record[3] else ""
+                data_len = record[4]
+                raw_data = record[5] if len(record) > 5 else b''
+                
+                # Traffic stats
+                if direction == 'S':
+                    server_messages += 1
+                    server_bytes += data_len
+                else:
+                    client_messages += 1
+                    client_bytes += data_len
+                
+                # TN3270 negotiation
+                if 'tn3270 negotiation' in notes.lower():
+                    negotiations += 1
+                
+                # Session detection (small server response typically = new connection)
+                if direction == 'S' and data_len == 3:
+                    sessions += 1
+                    start_timestamp = timestamp
+                    if last_timestamp > 0:
+                        total_time += start_timestamp - last_timestamp
+                else:
+                    last_timestamp = timestamp
+                
+                # Hack operations
+                if 'Hack Field Attributes: ENABLED' in notes or 'Hack Field Attributes: TOGGLED ON' in notes:
+                    field_hacks_enabled += 1
+                if 'Hack Text Color: ENABLED' in notes or 'Hack Text Color: TOGGLED ON' in notes:
+                    color_hacks_enabled += 1
+                if 'TOGGLED' in notes:
+                    hack_toggles += 1
+                
+                # Hidden field detection - parse 3270 data stream for hidden fields
+                if direction == 'S' and raw_data and len(raw_data) > 10:
+                    try:
+                        # Parse for SF (0x1D) and SFE (0x29) orders with hidden attribute
+                        j = 0
+                        screen_has_hidden = False
+                        while j < len(raw_data) - 1:
+                            byte = raw_data[j]
+                            if byte == 0x1D:  # SF - Start Field
+                                attr = raw_data[j + 1] if j + 1 < len(raw_data) else 0
+                                if (attr & 0x0C) == 0x0C:  # Hidden bits set
+                                    hidden_detected += 1
+                                    screen_has_hidden = True
+                                    # Check if there's data after this field
+                                    data_start = j + 2
+                                    data_end = data_start
+                                    while data_end < len(raw_data) and raw_data[data_end] not in [0x1D, 0x29, 0x11]:
+                                        data_end += 1
+                                    if data_end > data_start:
+                                        field_data = raw_data[data_start:data_end]
+                                        # Check if it has non-null data
+                                        if any(b != 0x00 and b != 0x40 for b in field_data):
+                                            hidden_with_data += 1
+                                j += 2
+                            elif byte == 0x29:  # SFE - Start Field Extended
+                                if j + 1 < len(raw_data):
+                                    count = raw_data[j + 1]
+                                    if j + 2 + count * 2 <= len(raw_data):
+                                        for k in range(count):
+                                            attr_type = raw_data[j + 2 + k * 2]
+                                            attr_value = raw_data[j + 3 + k * 2]
+                                            if attr_type == 0xC0 and (attr_value & 0x0C) == 0x0C:
+                                                hidden_detected += 1
+                                                screen_has_hidden = True
+                                        j += 2 + count * 2
+                                    else:
+                                        j += 1
+                                else:
+                                    j += 1
+                            else:
+                                j += 1
+                        if screen_has_hidden:
+                            screens_with_hidden.add(record_id)
+                    except:
+                        pass
+                
+                # AID injection
+                if 'Sending key:' in notes:
+                    inject_keys += 1
+                if 'AID Spoofed:' in notes:
+                    aid_spoof += 1
+                if 'AID Fuzz:' in notes:
+                    aid_fuzz += 1
+                if 'API: Send AID' in notes:
+                    api_aid += 1
+                
+                # Field injection
+                if 'API: Send field' in notes:
+                    api_field += 1
+                if 'API: Send command' in notes:
+                    api_command += 1
+                if 'API: Replay' in notes:
+                    api_replay += 1
+                if 'Inject setup - Mask:' in notes and 'Length:' in notes:
+                    mask_captures += 1
+                
+                # Fuzzing activity
+                if notes.startswith('Fuzz:'):
+                    if '/Order' in notes or 'Order/' in notes:
+                        fuzz_order += 1
+                    else:
+                        fuzz_field += 1
+                if notes.startswith('Brute:'):
+                    brute_force += 1
+                if notes.startswith('GUI: Fuzz'):
+                    gui_fuzz += 1
+                
+                # ABEND detection in server responses
+                if direction == 'S' and raw_data:
+                    for pattern in ABEND_PATTERNS:
+                        try:
+                            ebcdic_pattern = pattern.encode('cp500')
+                            if ebcdic_pattern in raw_data:
+                                abends += 1
+                                # Find causing payload
+                                if i > 0:
+                                    prev_notes = all_logs[i-1][3] if all_logs[i-1][3] else ""
+                                    if prev_notes.startswith('Fuzz:'):
+                                        # Extract category
+                                        if 'OVF' in prev_notes:
+                                            abend_causes['Buffer Overflow'] += 1
+                                        elif 'Order/' in prev_notes:
+                                            abend_causes['Order Injection'] += 1
+                                        elif 'RANDOM' in prev_notes:
+                                            abend_causes['Random Binary'] += 1
+                                        elif 'BOUND' in prev_notes:
+                                            abend_causes['Boundary Test'] += 1
+                                        elif 'CICS' in prev_notes:
+                                            abend_causes['CICS Injection'] += 1
+                                        elif 'COMP3' in prev_notes:
+                                            abend_causes['Packed Decimal'] += 1
+                                        else:
+                                            abend_causes['Other'] += 1
+                                    else:
+                                        abend_causes['Unknown'] += 1
+                                break
+                        except:
+                            pass
+                    
+                    # Error detection
+                    for pattern in ERROR_PATTERNS:
+                        try:
+                            ebcdic_pattern = pattern.encode('cp500')
+                            if ebcdic_pattern in raw_data:
+                                errors += 1
+                                break
+                        except:
+                            pass
+                            
+            except Exception as e:
+                continue
+        
+        total_time += start_timestamp - last_timestamp if last_timestamp > 0 else 0
+        
+        # Update UI
+        ip, port = self.hack3270.get_ip_port()
+        self.stats_labels['stats_server'].setText(f"{ip}:{port}")
+        self.stats_labels['stats_tls'].setText("Yes" if self.hack3270.get_tls() else "No")
+        self.stats_labels['stats_protocol'].setText("TN3270E" if self.hack3270.check_inject_3270e() else "TN3270")
+        self.stats_labels['stats_sessions'].setText(str(sessions))
+        self.stats_labels['stats_time'].setText(self.get_elapsed_time(abs(total_time)))
+        
+        self.stats_labels['stats_server_msgs'].setText(f"{server_messages:,}")
+        self.stats_labels['stats_server_bytes'].setText(f"{server_bytes:,}")
+        self.stats_labels['stats_client_msgs'].setText(f"{client_messages:,}")
+        self.stats_labels['stats_client_bytes'].setText(f"{client_bytes:,}")
+        self.stats_labels['stats_negotiations'].setText(str(negotiations))
+        avg_resp = server_bytes // server_messages if server_messages > 0 else 0
+        avg_req = client_bytes // client_messages if client_messages > 0 else 0
+        self.stats_labels['stats_avg_size'].setText(f"{avg_resp}B / {avg_req}B")
+        
+        self.stats_labels['stats_field_hacks'].setText(str(field_hacks_enabled))
+        self.stats_labels['stats_color_hacks'].setText(str(color_hacks_enabled))
+        self.stats_labels['stats_hack_toggles'].setText(str(hack_toggles))
+        
+        self.stats_labels['stats_hidden_detected'].setText(str(hidden_detected))
+        self.stats_labels['stats_hidden_with_data'].setText(str(hidden_with_data))
+        self.stats_labels['stats_screens_hidden'].setText(str(len(screens_with_hidden)))
+        
+        self.stats_labels['stats_inject_keys'].setText(str(inject_keys))
+        self.stats_labels['stats_aid_spoof'].setText(str(aid_spoof))
+        self.stats_labels['stats_aid_fuzz'].setText(str(aid_fuzz))
+        self.stats_labels['stats_api_aid'].setText(str(api_aid))
+        total_aid = inject_keys + aid_spoof + aid_fuzz + api_aid
+        self.stats_labels['stats_total_aid'].setText(str(total_aid))
+        
+        self.stats_labels['stats_api_field'].setText(str(api_field))
+        self.stats_labels['stats_api_command'].setText(str(api_command))
+        self.stats_labels['stats_api_replay'].setText(str(api_replay))
+        self.stats_labels['stats_mask_captures'].setText(str(mask_captures))
+        total_field = api_field + api_command + api_replay
+        self.stats_labels['stats_total_field'].setText(str(total_field))
+        
+        self.stats_labels['stats_fuzz_field'].setText(str(fuzz_field))
+        self.stats_labels['stats_fuzz_order'].setText(str(fuzz_order))
+        self.stats_labels['stats_brute'].setText(str(brute_force))
+        self.stats_labels['stats_gui_fuzz'].setText(str(gui_fuzz))
+        total_fuzz = fuzz_field + fuzz_order + brute_force + gui_fuzz
+        self.stats_labels['stats_total_fuzz'].setText(str(total_fuzz))
+        
+        self.stats_labels['stats_abends'].setText(str(abends))
+        self.stats_labels['stats_errors'].setText(str(errors))
+        self.stats_labels['stats_unique_crashes'].setText(str(len(abend_causes)))
+        abend_rate = (abends * 100 / total_fuzz) if total_fuzz > 0 else 0
+        self.stats_labels['stats_abend_rate'].setText(f"{abend_rate:.1f}%")
+        
+        # Top ABEND causes
+        if abend_causes:
+            sorted_causes = sorted(abend_causes.items(), key=lambda x: -x[1])
+            cause_lines = []
+            for i, (cause, count) in enumerate(sorted_causes[:5], 1):
+                pct = count * 100 / abends if abends > 0 else 0
+                cause_lines.append(f"{i}. {cause}: {count} ({pct:.1f}%)")
+            self.stats_abend_list.setText("\n".join(cause_lines))
+        else:
+            self.stats_abend_list.setText("No ABENDs detected in this session.")
+        
+        self.stats_status_label.setText(f"Updated - {len(all_logs)} log entries analyzed")
     
     def create_analysis_tab(self):
         """Create the Analysis tab for detecting injection anomalies."""
