@@ -2,6 +2,54 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.6.1 Changelog
+
+### Bug Fix: TN3270E Protocol Detection Cache
+
+- **Fixed `is_tn3270e()` stale cache bug**: The `_is_tn3270e` flag was cached forever and never cleared on `disconnect()` or `reconnect()`. If the proxy was restarted or the protocol mode changed, the stale cache caused `send_command()` to add a spurious 5-byte TN3270E header to plain TN3270 packets, corrupting transaction codes and causing APCT abends on KICKS/CICS.
+- **`disconnect()` now clears protocol cache**: Ensures protocol mode is re-detected on next connection.
+- **`reconnect()` now clears protocol cache**: Prevents stale TN3270E state from persisting across proxy restarts.
+- **`is_tn3270e()` error handling**: Now defaults to plain TN3270 mode on detection errors instead of potentially caching an incorrect `True` value.
+
+---
+
+## Version 2.6.0 Changelog
+
+### New Feature: MCP Server for AI-Assisted Pen Testing (`mcp_server.py`)
+
+Added a **Model Context Protocol (MCP) server** that exposes the full hack3270 API as 52 tools, enabling AI coding assistants (Cursor, VS Code + Copilot) to autonomously pen test mainframes through natural language interaction.
+
+#### Architecture
+```
+[AI Agent] <--stdio/JSON-RPC--> [mcp_server.py] <--TCP:31337--> [hack3270 Proxy] <--TN3270--> [Mainframe]
+```
+
+#### 52 MCP Tools in 9 Categories
+
+| Category | Tools | Description |
+|----------|-------|-------------|
+| **Connection** | `connect_api`, `disconnect_api`, `reconnect_api`, `ping`, `check_connection`, `test_mainframe_connection` | API and mainframe connectivity |
+| **Screen Reading** | `get_screen`, `get_screen_raw`, `get_screen_raw_hex`, `find_text`, `find_field_value`, `get_text_at` | Read and search terminal content |
+| **Field Analysis** | `analyze_screen_fields`, `get_input_fields`, `get_hidden_fields`, `analyze_hidden`, `check_abend` | Discover input, protected, and hidden fields |
+| **Input/AID Keys** | `send_enter`, `send_aid_key`, `send_pf_key`, `send_clear` | Send attention identifier keys |
+| **Data Sending** | `send_command`, `send_field_data`, `send_raw_hex`, `build_and_send_packet` | Type text, send to fields, craft raw packets |
+| **Waiting** | `wait_for_text`, `wait_for_screen_change` | Wait for screen responses |
+| **Database/Replay** | `load_database`, `close_database`, `list_databases`, `get_logs`, `get_log_entry`, `replay_client_data`, `replay_sequence` | Session capture and replay |
+| **Injection/Brute Force** | `list_wordlists`, `load_wordlist`, `get_wordlist_contents`, `setup_injection`, `inject_value`, `brute_force_field` | Credential brute forcing and field injection |
+| **Fuzzing/Scanning** | `scan_aid_keys`, `fuzz_field`, `fuzz_all_input_fields`, `fuzz_transaction_codes` | AID key scanning, field fuzzing, transaction enumeration |
+| **Utilities** | `convert_ascii_to_ebcdic`, `convert_ebcdic_to_ascii`, `encode_buffer_address`, `decode_buffer_address`, `get_protocol_info` | Encoding, addressing, and protocol info |
+| **Recording** | `start_recording`, `stop_recording`, `playback_recording` | Action recording and playback |
+
+#### Setup
+- Works with **Cursor** (`.cursor/mcp.json`) and **VS Code** (`settings.json`)
+- Communicates via JSON-RPC 2.0 over stdio
+- See `MCP_SETUP.md` for detailed installation instructions
+
+#### Dependencies
+- Added `mcp>=1.26.0` to `requirements.txt`
+
+---
+
 ## Version 2.5.2 Changelog
 
 ### API Bug Fixes

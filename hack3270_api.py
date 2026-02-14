@@ -140,6 +140,7 @@ class Hack3270API:
             except:
                 pass
             self._sock = None
+        self._is_tn3270e = None  # Clear cached protocol mode on disconnect
     
     def is_connected(self):
         """Check if connected to API."""
@@ -165,6 +166,7 @@ class Hack3270API:
     def reconnect(self):
         """Reconnect to API if disconnected."""
         self.disconnect()
+        self._is_tn3270e = None  # Clear cached protocol mode - must re-detect after reconnect
         self.connect()
     
     def _send(self, data):
@@ -298,9 +300,14 @@ class Hack3270API:
             True if TN3270E mode, False if plain TN3270
         """
         if self._is_tn3270e is None:
-            self._send('IS_TN3270E\n')
-            resp = self._recv().strip()
-            self._is_tn3270e = (resp == 'TRUE')
+            try:
+                self._send('IS_TN3270E\n')
+                resp = self._recv().strip().upper()
+                self._is_tn3270e = (resp == 'TRUE')
+            except Exception:
+                # On error, default to plain TN3270 (safer -- avoids adding
+                # unwanted TN3270E headers that corrupt packets)
+                self._is_tn3270e = False
         return self._is_tn3270e
     
     def send_raw(self, data, description=None):
@@ -354,6 +361,14 @@ class Hack3270API:
         """
         Send a command on an unformatted screen (e.g., transaction codes).
         
+        On unformatted screens (after CLEAR), the packet MUST NOT include an SBA
+        order before the data. The correct format is:
+            AID + cursor_address + EBCDIC_data + IAC_EOR
+        
+        Including SBA on unformatted screens causes CICS APCT abends because
+        CICS interprets the SBA-addressed data as a field update, but there
+        are no fields defined on the screen.
+        
         Args:
             text: ASCII command text (will be converted to EBCDIC)
             cursor_addr: Optional 2-byte cursor address (default: 0x40, 0xC4)
@@ -362,7 +377,6 @@ class Hack3270API:
             API response string
         """
         AID_ENTER = 0x7D
-        SBA = 0x11
         IAC_EOR = bytes([0xFF, 0xEF])
         TN3270E_HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x01])
         
@@ -371,12 +385,12 @@ class Hack3270API:
         
         ebcdic_text = self.ascii_to_ebcdic(text)
         
-        # Build packet with TN3270E header if needed
-        # Include SBA order for IBM mainframe compatibility
+        # Build packet WITHOUT SBA order - unformatted screens have no fields
+        # so SBA addressing would confuse CICS (causes APCT abends)
         if self.is_tn3270e():
-            packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + cursor_addr + ebcdic_text + IAC_EOR
+            packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
         else:
-            packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + cursor_addr + ebcdic_text + IAC_EOR
+            packet = bytes([AID_ENTER]) + cursor_addr + ebcdic_text + IAC_EOR
         return self.send_raw(packet, f'API: Send command "{text}"')
     
     def send_client_data(self, log_id):

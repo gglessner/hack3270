@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "hack3270": {
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "cwd": "."
+    }
+  }
+}
