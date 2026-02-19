@@ -208,6 +208,29 @@ def _format_fields(fields: list, show_values: bool = True) -> str:
     return '\n'.join(lines)
 
 
+def _resolve_aid(aid: str) -> int:
+    """Resolve an AID key name or hex string to its byte value."""
+    AID_MAP = {
+        'ENTER': 0x7D, 'CLEAR': 0x6D,
+        'PA1': 0x6C, 'PA2': 0x6E, 'PA3': 0x6B,
+        'SYSREQ': 0xF0,
+    }
+    pf_bytes = [
+        0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0x7A,
+        0x7B, 0x7C, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8,
+        0xC9, 0x4A, 0x4B, 0x4C
+    ]
+    for i in range(1, 25):
+        AID_MAP[f'PF{i}'] = pf_bytes[i - 1]
+
+    aid_upper = aid.upper()
+    if aid_upper.startswith('0X'):
+        return int(aid_upper, 16)
+    if aid_upper in AID_MAP:
+        return AID_MAP[aid_upper]
+    raise ValueError(f"Unknown AID: {aid}. Use ENTER, CLEAR, PF1-PF24, PA1-PA3, SYSREQ, or hex.")
+
+
 # =========================================================================
 # CONNECTION MANAGEMENT
 # =========================================================================
@@ -701,7 +724,7 @@ def send_command(text: str, cursor_row: int = 0, cursor_col: int = 0) -> str:
 
 
 @mcp.tool()
-def send_field_data(text: str, field_address: int, cursor_address: int = -1, add_space: bool = False) -> str:
+def send_field_data(text: str, field_address: int, cursor_address: int = -1, add_space: bool = False, aid: str = "ENTER") -> str:
     """
     Send text to a specific field on a formatted screen.
     
@@ -713,9 +736,11 @@ def send_field_data(text: str, field_address: int, cursor_address: int = -1, add
         field_address: Buffer address of the target field (from analyze_screen_fields)
         cursor_address: Buffer address for cursor position (-1 = same as field)
         add_space: Add trailing space after text (helps clear leftover chars)
+        aid: AID key to send with the data (default: 'ENTER'). Options: ENTER, CLEAR, PF1-PF24, PA1-PA3, SYSREQ, or hex like '0x7d'.
     """
     try:
         api = _ensure_connected()
+        aid_byte = _resolve_aid(aid)
         
         field_addr = api.encode_buffer_address(field_address)
         if cursor_address < 0:
@@ -723,11 +748,11 @@ def send_field_data(text: str, field_address: int, cursor_address: int = -1, add
         else:
             cursor_addr = api.encode_buffer_address(cursor_address)
         
-        resp = api.send_field(text, cursor_addr, field_addr, add_space=add_space)
+        resp = api.send_field(text, cursor_addr, field_addr, add_space=add_space, aid_byte=aid_byte)
         time.sleep(0.3)
         
         lines = _parse_screen(api)
-        output = [f"Sent field data: \"{text}\" to address {field_address} (response: {resp.strip()})", ""]
+        output = [f"Sent field data: \"{text}\" to address {field_address} (AID={aid}, response: {resp.strip()})", ""]
         for i, line in enumerate(lines):
             output.append(f"{i+1:2}| {line}")
         
@@ -738,6 +763,51 @@ def send_field_data(text: str, field_address: int, cursor_address: int = -1, add
         return '\n'.join(output)
     except Exception as e:
         return f"Error sending field data: {e}"
+
+
+@mcp.tool()
+def send_fields_data(fields_json: str, aid: str = "ENTER") -> str:
+    """
+    Send data to multiple fields in a single packet and submit.
+    
+    Useful for filling out forms with several fields (e.g., username + password)
+    in one operation instead of separate send_field_data calls.
+    
+    Args:
+        fields_json: JSON array of objects with 'address' (int) and 'text' (str).
+                     Example: '[{"address": 10, "text": "admin"}, {"address": 50, "text": "secret"}]'
+        aid: AID key to send (default: 'ENTER'). Options: ENTER, CLEAR, PF1-PF24, PA1-PA3, SYSREQ, or hex.
+    """
+    try:
+        api = _ensure_connected()
+        aid_byte = _resolve_aid(aid)
+        
+        fields = json.loads(fields_json)
+        if not isinstance(fields, list) or not fields:
+            return "Error: fields_json must be a non-empty JSON array of {\"address\": int, \"text\": str} objects"
+        
+        for f in fields:
+            if 'address' not in f or 'text' not in f:
+                return f"Error: each field must have 'address' and 'text' keys. Got: {f}"
+        
+        resp = api.send_fields(fields, aid_byte=aid_byte)
+        time.sleep(0.3)
+        
+        lines = _parse_screen(api)
+        field_desc = ", ".join(f'addr {f["address"]}="{f["text"]}"' for f in fields)
+        output = [f"Sent {len(fields)} fields: {field_desc} (AID={aid}, response: {resp.strip()})", ""]
+        for i, line in enumerate(lines):
+            output.append(f"{i+1:2}| {line}")
+        
+        abend = api.check_abend()
+        if abend:
+            output.append(f"\n*** ABEND DETECTED: {abend} ***")
+        
+        return '\n'.join(output)
+    except json.JSONDecodeError as e:
+        return f"Error parsing fields_json: {e}"
+    except Exception as e:
+        return f"Error sending fields data: {e}"
 
 
 @mcp.tool()
@@ -789,28 +859,7 @@ def build_and_send_packet(
     """
     try:
         api = _ensure_connected()
-        
-        # Map AID names to bytes
-        AID_MAP = {
-            'ENTER': 0x7D, 'CLEAR': 0x6D,
-            'PA1': 0x6C, 'PA2': 0x6E, 'PA3': 0x6B,
-            'SYSREQ': 0xF0,
-        }
-        for i in range(1, 25):
-            pf_bytes = [
-                0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0x7A,
-                0x7B, 0x7C, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8,
-                0xC9, 0x4A, 0x4B, 0x4C
-            ]
-            AID_MAP[f'PF{i}'] = pf_bytes[i-1]
-        
-        aid_upper = aid.upper()
-        if aid_upper.startswith('0X'):
-            aid_byte = int(aid_upper, 16)
-        elif aid_upper in AID_MAP:
-            aid_byte = AID_MAP[aid_upper]
-        else:
-            return f"Unknown AID: {aid}. Use ENTER, CLEAR, PF1-PF24, PA1-PA3, SYSREQ, or hex."
+        aid_byte = _resolve_aid(aid)
         
         ebcdic_data = api.ascii_to_ebcdic(text)
         

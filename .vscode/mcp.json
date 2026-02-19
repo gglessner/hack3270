@@ -1,7 +1,7 @@
 {
   "servers": {
     "hack3270": {
-      "command": "python3",
+      "command": "${command:python.interpreterPath}",
       "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
       "cwd": "${workspaceFolder}"
     }

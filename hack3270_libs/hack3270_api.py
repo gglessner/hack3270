@@ -340,7 +340,7 @@ class Hack3270API:
             self._recorded.append(('RAW', data))
         return resp
     
-    def send_field(self, text, cursor_addr, field_addr, add_space=False):
+    def send_field(self, text, cursor_addr, field_addr, add_space=False, aid_byte=None):
         """
         Send text to a specific field on a formatted screen.
         
@@ -349,11 +349,13 @@ class Hack3270API:
             cursor_addr: 2-byte cursor address (from captured packet)
             field_addr: 2-byte field address (from captured packet)
             add_space: Add trailing space after text
+            aid_byte: AID byte to use (default: 0x7D / ENTER)
             
         Returns:
             API response string
         """
-        AID_ENTER = 0x7D
+        if aid_byte is None:
+            aid_byte = 0x7D  # ENTER
         SBA = 0x11
         IAC_EOR = bytes([0xFF, 0xEF])
         TN3270E_HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x01])
@@ -364,10 +366,50 @@ class Hack3270API:
         
         # Build packet with TN3270E header if needed
         if self.is_tn3270e():
-            packet = TN3270E_HEADER + bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
+            packet = TN3270E_HEADER + bytes([aid_byte]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
         else:
-            packet = bytes([AID_ENTER]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
+            packet = bytes([aid_byte]) + cursor_addr + bytes([SBA]) + field_addr + ebcdic_text + IAC_EOR
         return self.send_raw(packet, f'API: Send field "{text[:20]}..."' if len(text) > 20 else f'API: Send field "{text}"')
+
+    def send_fields(self, fields, cursor_addr=None, aid_byte=None):
+        """
+        Send data to multiple fields in a single packet.
+        
+        Args:
+            fields: List of dicts with 'address' (int) and 'text' (str) keys.
+                    Example: [{'address': 10, 'text': 'user'}, {'address': 50, 'text': 'pass'}]
+            cursor_addr: 2-byte cursor address (default: first field's encoded address)
+            aid_byte: AID byte to use (default: 0x7D / ENTER)
+            
+        Returns:
+            API response string
+        """
+        if not fields:
+            raise Hack3270APIError("No fields provided")
+        if aid_byte is None:
+            aid_byte = 0x7D  # ENTER
+        SBA = 0x11
+        IAC_EOR = bytes([0xFF, 0xEF])
+        TN3270E_HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x01])
+        
+        if cursor_addr is None:
+            cursor_addr = self.encode_buffer_address(fields[0]['address'])
+        
+        field_data = b''
+        texts = []
+        for f in fields:
+            addr = self.encode_buffer_address(f['address'])
+            ebcdic = self.ascii_to_ebcdic(f['text'])
+            field_data += bytes([SBA]) + addr + ebcdic
+            texts.append(f['text'])
+        
+        if self.is_tn3270e():
+            packet = TN3270E_HEADER + bytes([aid_byte]) + cursor_addr + field_data + IAC_EOR
+        else:
+            packet = bytes([aid_byte]) + cursor_addr + field_data + IAC_EOR
+        
+        desc = ', '.join(f'"{t}"' for t in texts)
+        return self.send_raw(packet, f'API: Send fields [{desc[:60]}]')
     
     def send_command(self, text, cursor_addr=None):
         """

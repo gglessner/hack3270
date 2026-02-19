@@ -1,5 +1,33 @@
 # Changelog
 
+## Version 2.6.6
+
+### AI Skills Restructure: Tutorial-First Skill Files
+
+Major restructuring of AI skill files to make them accessible to all AI models (including weaker ones like GPT-4.1) and all IDEs.
+
+- **New `skills/` directory at project root**: All skill content now lives here as the single source of truth, accessible from any IDE or AI tool.
+- **New `skills/hack3270-mcp-tutorial.md`**: Comprehensive "driver's ed" tutorial for AI assistants. Covers all 53 MCP tools with practical examples, decision trees for choosing the right tool, common patterns and recipes, gotchas and troubleshooting, and a TN3270 protocol cheat sheet. Written for the lowest-common-denominator AI model.
+- **Restructured `skills/hack3270.md`**: Guardrailed pen testing skill with table of contents and prerequisite pointer to the tutorial.
+- **Restructured `skills/tn3270-pentest.md`**: Unrestricted pen testing skill with table of contents and prerequisite pointer to the tutorial.
+- **New `skills/README.md`**: Index file explaining which skill to use when.
+- **New `.github/copilot-instructions.md`**: VS Code + GitHub Copilot auto-discovery. Automatically tells Copilot about the skills directory in every chat session.
+- **`.cursor/skills/` converted to thin pointers**: Cursor's skill files now point to `skills/` directory, maintaining auto-load functionality while eliminating content duplication.
+- **New `.cursor/skills/hack3270-mcp-tutorial/SKILL.md`**: Cursor auto-load pointer for the tutorial.
+
+---
+
+## Version 2.6.5
+
+### New Features: Multi-Field Submission and AID Key Selection
+
+- **`send_field_data` now accepts an `aid` parameter**: Previously hardcoded to ENTER, you can now specify any AID key (PF1-PF24, PA1-PA3, CLEAR, SYSREQ, or hex) when sending field data. Defaults to ENTER for backward compatibility.
+- **New `send_fields_data` MCP tool**: Send data to multiple fields in a single packet. Accepts a JSON array of `{address, text}` objects and submits them all with one AID key press. Useful for filling out login forms (username + password), multi-field searches, or any screen with multiple inputs.
+- **New `send_fields()` API method**: Low-level counterpart in `hack3270_api.py` that constructs a multi-SBA packet with configurable AID byte.
+- **Refactored AID resolution**: Extracted `_resolve_aid()` helper in the MCP server, eliminating duplicated AID mapping code across tools.
+
+---
+
 ## Version 2.6.4
 
 ### Project Reorganization and VS Code MCP Support

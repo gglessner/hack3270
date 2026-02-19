@@ -1,0 +1,23 @@
+# Session databases (contain captured traffic)
+pentest.db
+pentest.csv
+*.db.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE (user-specific settings; .cursor/ and .vscode/ are committed intentionally)
+# Note: .vscode/mcp.json is shipped for VS Code MCP support
+
+# OS
+Thumbs.db
+.DS_Store
