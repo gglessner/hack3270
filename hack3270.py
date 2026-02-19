@@ -8,6 +8,8 @@ __author__ = 'Garland Glessner'
 __license__ = "GPL-3.0"
 
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hack3270_libs'))
 import gui
 import libhack3270
 import argparse

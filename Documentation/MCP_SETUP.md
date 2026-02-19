@@ -11,7 +11,7 @@ The MCP (Model Context Protocol) server exposes all 52 hack3270 tools to an AI c
 ```
 +------------------+       stdio        +----------------+     TCP:31337     +---------------+     TN3270      +------------+
 |                  | <--- JSON-RPC ---> |                | <--- HTTP ----->  |               | <--- 3270 --->  |            |
-|  AI Agent        |                    |  mcp_server.py |                   |  hack3270     |                 | Mainframe  |
+|  AI Agent        |                    |  hack3270_mcp.py |                   |  hack3270     |                 | Mainframe  |
 |  (Cursor/Copilot)|                    |  (52 tools)    |                   |  Proxy + GUI  |                 | (CICS/TSO) |
 |                  |                    |                |                   |  :3271 proxy  |                 |            |
 +------------------+                    +----------------+                   +---------------+                 +------------+
@@ -82,35 +82,19 @@ Click "Continue" in the hack3270 GUI when the connection is received.
 
 Create the file `.cursor/mcp.json` in your **project root** (the hack3270 directory):
 
-#### Windows
-
-```json
-{
-  "mcpServers": {
-    "hack3270": {
-      "command": "python",
-      "args": ["mcp_server.py"],
-      "cwd": "C:\\path\\to\\hack3270"
-    }
-  }
-}
-```
-
-#### macOS / Linux
-
 ```json
 {
   "mcpServers": {
     "hack3270": {
       "command": "python3",
-      "args": ["mcp_server.py"],
-      "cwd": "/path/to/hack3270"
+      "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
+      "cwd": "."
     }
   }
 }
 ```
 
-> **Important:** Replace the `cwd` path with the actual absolute path to your hack3270 directory. On Windows, use double backslashes (`\\`).
+> **Note:** `python3` works on macOS, Linux, and modern Windows installations. If your Windows system only recognizes `python`, change the command accordingly. The `cwd` of `"."` uses the workspace root; replace with an absolute path if needed (use double backslashes on Windows, e.g., `"C:\\path\\to\\hack3270"`).
 
 After saving, **restart Cursor** or reload the window (`Ctrl+Shift+P` > "Developer: Reload Window"). The hack3270 MCP tools should appear in your AI agent's tool list.
 
@@ -125,55 +109,41 @@ After saving, **restart Cursor** or reload the window (`Ctrl+Shift+P` > "Develop
 
 ### Microsoft Visual Studio Code
 
-VS Code supports MCP servers through GitHub Copilot's agent mode. Configuration goes in your **User Settings** or **Workspace Settings**.
+VS Code supports MCP servers through GitHub Copilot's agent mode. A `.vscode/mcp.json` file is included in the repository and should work out of the box.
 
-#### Option A: Workspace Settings (Recommended)
-
-Create or edit `.vscode/settings.json` in your project root:
+#### Included Configuration (`.vscode/mcp.json`)
 
 ```json
 {
-  "github.copilot.chat.mcpServers": {
+  "servers": {
     "hack3270": {
-      "command": "python",
-      "args": ["mcp_server.py"],
-      "cwd": "C:\\path\\to\\hack3270"
+      "command": "${command:python.interpreterPath}",
+      "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
+      "cwd": "${workspaceFolder}"
     }
   }
 }
 ```
 
-#### Option B: User Settings (Global)
+`${command:python.interpreterPath}` uses the Python interpreter selected in VS Code's Python extension, making this configuration OS-agnostic (works on Windows, macOS, and Linux without modification).
 
-Open VS Code Settings JSON (`Ctrl+Shift+P` > "Preferences: Open User Settings (JSON)") and add:
+#### Alternative: User Settings (Global)
 
-```json
-{
-  "github.copilot.chat.mcpServers": {
-    "hack3270": {
-      "command": "python",
-      "args": ["mcp_server.py"],
-      "cwd": "C:\\path\\to\\hack3270"
-    }
-  }
-}
-```
-
-#### macOS / Linux
-
-Use `python3` instead of `python` and forward-slash paths:
+If you prefer a global configuration, open VS Code Settings JSON (`Ctrl+Shift+P` > "Preferences: Open User Settings (JSON)") and add:
 
 ```json
 {
   "github.copilot.chat.mcpServers": {
     "hack3270": {
       "command": "python3",
-      "args": ["mcp_server.py"],
+      "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
       "cwd": "/path/to/hack3270"
     }
   }
 }
 ```
+
+> **Note:** Replace `python3` with `python` if needed on your system, and set `cwd` to the absolute path of your hack3270 directory.
 
 #### Verify in VS Code
 
@@ -345,7 +315,7 @@ If connection fails:
 | Server shows red/error in Cursor MCP settings | Check the error message -- usually a wrong path or missing dependency |
 | `python` not found | Use the full path to Python (e.g., `C:\\Python310\\python.exe`) or ensure Python is on PATH |
 | `ModuleNotFoundError: No module named 'mcp'` | Run `pip install mcp>=1.26.0` |
-| `ModuleNotFoundError: No module named 'hack3270_api'` | Verify `cwd` points to the hack3270 directory containing `hack3270_api.py` |
+| `ModuleNotFoundError: No module named 'hack3270_api'` | Verify `cwd` points to the hack3270 project root (the MCP server auto-adds `hack3270_libs/` to its path) |
 | Tools don't appear in VS Code | Ensure you're in Agent mode (not Ask mode) in Copilot Chat |
 
 ### Connection to hack3270 fails
@@ -457,8 +427,8 @@ The skill file teaches the AI agent:
 
 | File | Purpose |
 |------|---------|
-| `mcp_server.py` | The MCP server (52 tools wrapping the hack3270 API) |
-| `hack3270_api.py` | Python client library for the hack3270 Web API |
+| `MCPs/hack3270_mcp/hack3270_mcp.py` | The MCP server (52 tools wrapping the hack3270 API) |
+| `hack3270_libs/hack3270_api.py` | Python client library for the hack3270 Web API |
 | `hack3270.py` | Main hack3270 application (proxy + GUI) |
 | `.cursor/mcp.json` | Cursor IDE MCP configuration |
 | `.cursor/skills/tn3270-pentest/SKILL.md` | AI pen testing skill file (Cursor auto-loads, VS Code needs setup) |

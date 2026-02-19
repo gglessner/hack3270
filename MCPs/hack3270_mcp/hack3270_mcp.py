@@ -25,9 +25,9 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-# Add the hack3270 directory to path so we can import the API
-HACK3270_DIR = Path(__file__).parent.resolve()
-sys.path.insert(0, str(HACK3270_DIR))
+# Add the hack3270_libs directory to path so we can import the API
+HACK3270_DIR = Path(__file__).parent.parent.parent / "hack3270_libs"
+sys.path.insert(0, str(HACK3270_DIR.resolve()))
 
 from hack3270_api import Hack3270API, Hack3270APIError
 

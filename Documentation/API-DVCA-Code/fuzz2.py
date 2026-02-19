@@ -9,11 +9,12 @@ Uses the hack3270_api library for screen parsing and packet building.
 """
 
 import sys
+import os
 import time
 import random
 import socket
 
-sys.path.insert(0, '..')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'hack3270_libs'))
 from hack3270_api import Hack3270API
 
 # Configuration

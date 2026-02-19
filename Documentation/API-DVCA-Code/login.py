@@ -4,7 +4,8 @@ login.py - Connect and login to DVCA
 """
 
 import sys
-sys.path.insert(0, '..')
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'hack3270_libs'))
 
 import time
 from hack3270_api import Hack3270API

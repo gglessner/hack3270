@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "hack3270": {
-      "command": "python",
-      "args": ["mcp_server.py"],
+      "command": "python3",
+      "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
       "cwd": "."
     }
   }
