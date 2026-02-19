@@ -2,6 +2,20 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.6.3 Changelog
+
+### New AI Skill: hack3270 (Guardrailed Pen Testing)
+
+- **Added `.cursor/skills/hack3270/SKILL.md`**: A production-safe AI skill for pen testing scoped CICS/KICKS applications. Unlike the unrestricted `tn3270-pentest` skill (designed for lab/CTF use), `hack3270` enforces strict guardrails to prevent scope creep, denial of service, and account lockout during authorized engagements.
+- **Transaction scope locking**: AI testing is automatically confined to the 2-character prefix of the entry-point transaction (e.g., `MC**` for `MCGM`). System transactions, out-of-scope codes, and wide enumeration are prohibited.
+- **8 hard guardrails**: No system transaction execution, TSO escape test-only (validate with `TIME`, no post-exploitation), no JCL submission, no RACF brute force, graduated overflow fuzzing (human approval required), stop-on-abend, no wide transaction enumeration, and sensitive data masking in reports.
+- **Escalation protocol**: High-risk actions (overflow fuzzing, data modification, out-of-prefix testing) require explicit human approval with risk-level justification.
+- **11-step safe methodology**: Observation-first approach with baseline establishment, full screen mapping, hidden/protected field analysis, conservative AID key scanning, input validation testing, and structured reporting with positive security control documentation.
+- **Recovery procedures**: Handles accidental app exit, system transaction screen landing, abends, account lockout, TSO prompts, TN3270 integrity detection, and unresponsive applications.
+- **Tool-specific guardrails**: Per-tool restrictions annotated in the MCP tools quick reference, cross-referencing guardrail numbers.
+
+---
+
 ## Version 2.6.2 Changelog
 
 ### Auto-Reconnect on hack3270 Restart
