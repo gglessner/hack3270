@@ -2,6 +2,15 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
+## Version 2.6.2 Changelog
+
+### Auto-Reconnect on hack3270 Restart
+
+- **MCP server now auto-reconnects when hack3270 is restarted**: Previously, restarting the hack3270 proxy caused a broken pipe error in the MCP server that required manually calling `reconnect_api`. Now, `_ensure_connected()` performs a lightweight ping health check before every tool call and silently reconnects if the connection is dead.
+- **`_send()` / `_recv()` broken pipe handling**: Connection errors (`BrokenPipeError`, `ConnectionResetError`, `ConnectionAbortedError`) are now caught and cleanly tear down the dead socket, clearing both `_sock` and the `_is_tn3270e` protocol cache so the next reconnect starts fresh.
+
+---
+
 ## Version 2.6.1 Changelog
 
 ### Bug Fix: TN3270E Protocol Detection Cache

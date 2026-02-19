@@ -175,15 +175,27 @@ class Hack3270API:
             raise Hack3270APIError("Not connected")
         if isinstance(data, str):
             data = data.encode('utf-8')
-        self._sock.sendall(data)
+        try:
+            self._sock.sendall(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+            self._sock = None
+            self._is_tn3270e = None
+            raise Hack3270APIError(f"Connection lost (send): {e}")
     
     def _recv(self):
         """Receive data from API."""
         if not self._sock:
             raise Hack3270APIError("Not connected")
-        data = self._sock.recv(self.BUFFER)
+        try:
+            data = self._sock.recv(self.BUFFER)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+            self._sock = None
+            self._is_tn3270e = None
+            raise Hack3270APIError(f"Connection lost (recv): {e}")
         if not data:
-            raise Hack3270APIError("Connection closed")
+            self._sock = None
+            self._is_tn3270e = None
+            raise Hack3270APIError("Connection closed by hack3270")
         return data.decode('utf-8')
     
     def _recv_raw(self):

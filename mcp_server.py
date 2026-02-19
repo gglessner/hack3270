@@ -58,10 +58,17 @@ def _get_api() -> Hack3270API:
 
 
 def _ensure_connected() -> Hack3270API:
-    """Ensure API is connected, auto-connect if needed."""
+    """Ensure API is connected, auto-reconnect on broken pipe / hack3270 restart."""
     api = _get_api()
     if api._sock is None:
         api.connect()
+        return api
+    # Ping health check -- detects broken pipes from hack3270 restarts.
+    # Sub-millisecond on localhost so negligible overhead.
+    try:
+        api.ping()
+    except Exception:
+        api.reconnect()
     return api
 
 
