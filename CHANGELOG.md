@@ -1,5 +1,24 @@
 # Changelog
 
+## Version 2.6.7
+
+### Bug Fixes and New Features
+
+- **Fixed "Auto Send Server" and "Auto Send Client" in the GUI log viewer**: Clicking a log entry with either auto-send checkbox enabled now correctly replays the packet. The bug was caused by reading the wrong tree column index (`Delta` instead of `Sender`) after the Delta column was added, so the sender check never matched "Server" or "Client".
+- **New `send_field_data` `aid` parameter**: Send field data with any AID key (PF1-PF24, PA1-PA3, CLEAR, SYSREQ, or hex) instead of just ENTER. Defaults to ENTER for backward compatibility.
+- **New `send_fields_data` MCP tool**: Fill multiple fields in a single packet and submit once. Accepts a JSON array of `{address, text}` objects. Useful for login forms (username + password) and multi-field searches.
+- **New `send_fields()` API method**: Low-level counterpart in `hack3270_api.py` that constructs a multi-SBA packet with configurable AID byte.
+- **Refactored AID resolution**: Extracted `_resolve_aid()` helper in the MCP server, eliminating duplicated AID mapping code.
+- **AI Skills Restructure**: Created `skills/` directory with comprehensive, tutorial-first skill files:
+  - `hack3270-mcp-tutorial.md` -- Complete tutorial covering all 53 MCP tools with examples, decision trees, recipes, gotchas, and TN3270 protocol reference
+  - `hack3270.md` -- Guardrailed pen testing skill with TOC and prerequisite pointer
+  - `tn3270-pentest.md` -- Unrestricted pen testing skill with TOC and prerequisite pointer
+  - `README.md` -- Index of available skills
+- **VS Code auto-discovery**: Added `.github/copilot-instructions.md` so GitHub Copilot automatically knows about the skills directory.
+- **Cursor pointer skills**: `.cursor/skills/` converted to thin pointers referencing `skills/` directory.
+
+---
+
 ## Version 2.6.6
 
 ### AI Skills Restructure: Tutorial-First Skill Files

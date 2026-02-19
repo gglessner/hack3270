@@ -3504,7 +3504,7 @@ class Hack3270GUI(QMainWindow):
             return
         item = items[0]
         record_id = int(item.text(0))
-        record_cs = item.text(2)
+        record_cs = item.text(3)
 
         for row in self.hack3270.get_log(record_id):
             ebcdic_data = self.hack3270.get_ascii(row[5])
