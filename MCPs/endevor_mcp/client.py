@@ -268,7 +268,16 @@ class EndevorConnection:
             data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             token = None
             if isinstance(data, dict):
-                token = data.get("token") or data.get("data", {}).get("token")
+                token = data.get("token")
+                if not token:
+                    d = data.get("data")
+                    if isinstance(d, dict):
+                        token = d.get("token")
+                    elif isinstance(d, list):
+                        for item in d:
+                            if isinstance(item, dict) and item.get("token"):
+                                token = item["token"]
+                                break
             if token:
                 self._jwt_token = token
                 self._session.headers["Authorization"] = f"Bearer {token}"
