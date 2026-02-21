@@ -12,6 +12,12 @@ Before performing any mainframe-related tasks, read the appropriate skill files 
 
 3. **`skills/tn3270-pentest.md`** -- **Unrestricted pen testing.** Use this for labs, CTFs, and full-scope engagements. Covers CICS system transaction exploitation, TSO post-exploitation, VTAM enumeration, RACF bypass, JCL submission, and all attack patterns.
 
+4. **`skills/endevor-mcp.md`** -- **Endevor SCM integration.** 22 read-only tools for browsing Endevor inventory, retrieving source code, inspecting element history, and listing packages. Use for AI-driven source code review and security assessments alongside hack3270 pen testing.
+
+5. **`skills/mainframe-security.md`** -- 19 vulnerability classes with COBOL source code patterns and hack3270 exploitation steps.
+
+6. **`skills/security-checklist.md`** -- 10-category source code review checklist and hack3270 tool cross-reference.
+
 See `skills/README.md` for guidance on which skill to use.
 
 ## Quick Tips

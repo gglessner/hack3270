@@ -2,7 +2,7 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
-**Current Version: 2.6.7** -- See [CHANGELOG.md](CHANGELOG.md) for version history.
+**Current Version: 2.7.0** -- See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Features
 
@@ -20,18 +20,22 @@ A Python 3 toolkit for manipulating TN3270 data streams, specifically designed f
 
 hack3270 includes a Model Context Protocol (MCP) server that exposes all 52 API tools to AI coding assistants. The AI can read mainframe screens, analyze fields, send commands, and execute attack patterns -- all through conversational instructions.
 
+When paired with the **Endevor-MCP** server, the AI can simultaneously retrieve COBOL source code, BMS maps, and system tables from Broadcom Endevor SCM, enabling **source-informed pen testing** -- the AI reads vulnerabilities in source and verifies them live in a single shot. This approach reduced a full application assessment from ~8.5 minutes to ~4.5 minutes (46% faster) with identical finding coverage.
+
 ### Architecture
 
 ```
-[AI Agent] <--stdio/JSON-RPC--> [hack3270_mcp.py] <--TCP:31337--> [hack3270 Proxy] <--TN3270--> [Mainframe]
-   (Cursor / VS Code Copilot)       (52 tools)         (localhost:3271)                    (CICS/TSO)
-                                                              ^
-                                                              |
-                                                       [Terminal Emulator]
-                                                         (x3270/wx3270)
+                              [hack3270_mcp.py] <--TCP:31337--> [hack3270 Proxy] <--TN3270--> [Mainframe]
+                                  (52 tools)                     (localhost:3271)                (CICS/TSO)
+                                      ^                                ^
+[AI Agent] <--stdio/JSON-RPC-->       |                                |
+   (Cursor / VS Code Copilot)         |                         [Terminal Emulator]
+                                      v                           (x3270/wx3270)
+                              [endevor_mcp.py] <--REST API v2--> [Endevor SCM]
+                                (read-only)                      (COBOL/BMS/Tables)
 ```
 
-The AI agent and the terminal emulator operate in parallel through the same hack3270 proxy. The human sees the mainframe screen in real time while the AI reads, analyzes, and interacts with it programmatically.
+The AI agent orchestrates both MCP servers in parallel: hack3270 for live mainframe interaction and Endevor-MCP for source code retrieval. The human sees the mainframe screen in real time through the terminal emulator while the AI reads, analyzes, and interacts programmatically.
 
 ### AI Skill Files
 
@@ -39,16 +43,29 @@ Two skill files provide the AI with mainframe pen testing knowledge and methodol
 
 | Skill | Location | Purpose |
 |-------|----------|---------|
-| **hack3270** (guardrailed) | `.cursor/skills/hack3270/SKILL.md` | Production-safe testing with scope locking, rate limiting, and human approval for escalation. Restricts the AI to the target application's transaction prefix. |
+| **hack3270** (guardrailed) | `.cursor/skills/hack3270/SKILL.md` | Production-safe testing with scope locking, rate limiting, and human approval for escalation. Restricts the AI to the target application's transaction prefix. Includes Endevor-enhanced methodology for source-informed testing. |
 | **tn3270-pentest** (unrestricted) | `.cursor/skills/tn3270-pentest/SKILL.md` | Full knowledge base for lab/CTF environments. Covers system transactions, TSO exploitation, JCL submission, and VTAM enumeration. |
 
 Use **hack3270** for authorized engagements against real systems. Use **tn3270-pentest** for training and controlled lab environments.
+
+### Source-Informed Testing with Endevor-MCP
+
+When the target application's source code is stored in Broadcom Endevor SCM, the **Endevor-MCP** server enables a dramatically faster assessment methodology. The AI retrieves and analyzes source code in parallel with live testing:
+
+| Source Type | What It Reveals |
+|-------------|-----------------|
+| **COBOL programs** | Hardcoded credentials, missing input validation, AID key handlers, authorization gaps, `RECEIVE MAP ... ASIS` patterns |
+| **BMS maps** | FSET on protected fields (tamperable), DRK hidden fields (bypassable), field positions for precise targeting |
+| **PCT (Program Control Table)** | All transaction-to-program mappings, including hidden transactions not shown in menus |
+| **PPT / FCT** | Installed programs, maps, and VSAM datasets the application accesses |
+
+Instead of brute forcing a 4-digit PIN (10,000 attempts), the AI reads `01 SUPERVISOR-CODE PIC 9(4) VALUE 1337.` in COBOL and verifies it in one shot. Instead of testing all 27 AID keys on every screen, the AI reads `IF EIBAID = DFHPA3 ... XCTL PROGRAM('SECRET')` and presses PA3 directly. This eliminates guesswork and produces **source-confirmed, live-verified** findings -- the strongest possible evidence for a pen test report.
 
 ### Quick Start (AI Mode)
 
 1. **Install dependencies** and start hack3270 as normal (see [Installation](#installation) and [Quick Start](#quick-start))
 
-2. **Configure the MCP server** in your IDE:
+2. **Configure the MCP servers** in your IDE:
 
    **Cursor** (`.cursor/mcp.json` -- included in the repository):
    ```json
@@ -58,6 +75,17 @@ Use **hack3270** for authorized engagements against real systems. Use **tn3270-p
          "command": "python3",
          "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
          "cwd": "."
+       },
+       "endevor-mcp": {
+         "command": "python3",
+         "args": ["MCPs/endevor_mcp/endevor_mcp.py"],
+         "cwd": ".",
+         "env": {
+           "ENDEVOR_HOST": "your-endevor-host",
+           "ENDEVOR_PORT": "443",
+           "ENDEVOR_USER": "your-user",
+           "ENDEVOR_PASS": "your-password"
+         }
        }
      }
    }
@@ -71,10 +99,23 @@ Use **hack3270** for authorized engagements against real systems. Use **tn3270-p
          "command": "${command:python.interpreterPath}",
          "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
          "cwd": "${workspaceFolder}"
+       },
+       "endevor-mcp": {
+         "command": "${command:python.interpreterPath}",
+         "args": ["MCPs/endevor_mcp/endevor_mcp.py"],
+         "cwd": "${workspaceFolder}",
+         "env": {
+           "ENDEVOR_HOST": "your-endevor-host",
+           "ENDEVOR_PORT": "443",
+           "ENDEVOR_USER": "your-user",
+           "ENDEVOR_PASS": "your-password"
+         }
        }
      }
    }
    ```
+
+   The Endevor-MCP server is optional -- hack3270 works standalone for black-box testing. Add it when you have Endevor access for source-informed testing.
 
 3. **Ask the AI** to pen test the application: "Pen test the mainframe application starting at transaction MCGM"
 
@@ -82,7 +123,7 @@ For detailed setup instructions including troubleshooting, see [Documentation/MC
 
 ### What the AI Can Do
 
-With the MCP tools, the AI can autonomously:
+With the hack3270 MCP tools, the AI can autonomously:
 
 - **Read and parse screens** -- interpret 3270 data streams, extract text, identify field layouts
 - **Detect hidden fields** -- find non-display fields containing sensitive data or hidden menu options
@@ -96,7 +137,15 @@ With the MCP tools, the AI can autonomously:
 - **Craft raw packets** -- build custom TN3270 packets with precise SBA addressing and EBCDIC encoding
 - **Generate reports** -- produce structured pen test findings with severity ratings and remediation guidance
 
-All actions are logged to SQLite3 with full binary packet capture for audit and replay.
+With the Endevor-MCP server added, the AI can additionally:
+
+- **Retrieve COBOL source** -- read program logic to identify hardcoded credentials, missing validation, AID key handlers, and authorization gaps without brute forcing
+- **Analyze BMS maps** -- discover FSET attributes on protected fields and DRK hidden fields to plan precise attacks
+- **Query system tables** -- read the PCT, PPT, and FCT to discover all transaction codes, programs, and VSAM datasets
+- **Cross-reference source with live screens** -- map BMS field positions to hack3270 buffer addresses for targeted exploitation
+- **Produce source-confirmed findings** -- cite exact COBOL source lines and BMS definitions in the pen test report
+
+All hack3270 actions are logged to SQLite3 with full binary packet capture for audit and replay.
 
 ## How It Works
 

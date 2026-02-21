@@ -1332,3 +1332,102 @@ Mainframes use EBCDIC, not ASCII. The MCP tools convert automatically. Reference
 - **TN3270E**: Extended protocol. Packets have a 5-byte header before the AID byte. Supports device names, logical units, and response handling.
 
 The MCP tools handle this automatically. Use `check_connection()` or `get_protocol_info()` to see which mode is active.
+
+---
+
+## 9. Combining with Endevor-MCP
+
+If the Endevor-MCP server is also available, you can dramatically accelerate pen testing by running **source code retrieval and live exploitation in parallel**. This section describes the methodology that reduced a full DVCA pen test from potentially hours (black-box) to **under 10 minutes** (source-informed).
+
+### When to Use This Approach
+
+Use it when:
+- The Endevor-MCP server is running and connected (`endevor_connect` or `conn_id='auto'`)
+- The target application's source code is managed in Endevor
+- Your human has authorized source code access (it may be a separate authorization from the pen test itself)
+
+If Endevor is not available, fall back to the standard methodology in the skill file. Everything in hack3270 still works without source code -- it just takes longer because you must discover vulnerabilities through trial and error.
+
+### The Parallel Workflow
+
+The key insight is that Endevor queries and hack3270 interactions are **independent operations against different servers**. You should run them at the same time, not sequentially.
+
+**Phase 1: Inventory (run both simultaneously)**
+
+| Endevor-MCP (source) | hack3270 (live) |
+|---|---|
+| `endevor_list_environments` | `get_screen()` -- see the entry point |
+| `endevor_list_systems` | `analyze_screen_fields()` -- discover fields |
+| `endevor_list_subsystems` | Navigate to first menu screen |
+| `endevor_list_types` | Record transaction codes visible on screen |
+| `endevor_list_elements` for each type | Map all reachable screens via menu navigation |
+
+By the time you finish listing Endevor elements, you should also have a complete screen map from hack3270.
+
+**Phase 2: Targeted Source Retrieval**
+
+Retrieve source in this priority order:
+
+1. **System tables (PCT/PPT/FCT)** -- these are small and contain the complete transaction-to-program mapping. The PCT alone tells you every valid transaction code and which COBOL program handles it. This is faster than `fuzz_transaction_codes()` and gives you 100% coverage.
+
+2. **BMS maps** -- these define every field on every screen, including hidden fields. Search for:
+   - `ATTRB=(NORM,PROT,FSET)` -- protected fields the server reads back (tamper targets)
+   - `ATTRB=(NORM,PROT,FSET,DRK)` -- hidden fields (invisible control flags)
+   - `POS=(row,col)` -- cross-reference with hack3270 field addresses
+
+3. **COBOL programs** -- the business logic. Search for:
+   - `PIC 9(4) VALUE 1337` or `PIC X(8) VALUE 'PASSWORD'` -- hardcoded credentials
+   - `IF EIBAID = DFHPA3` -- hidden AID key handlers (PA keys, unusual PF keys)
+   - `EXEC CICS DELETE` or `EXEC CICS REWRITE` without preceding `IF` checks -- authorization gaps
+   - `RECEIVE MAP ... ASIS` -- raw client data accepted
+   - `XCTL PROGRAM('name')` and `LINK PROGRAM('name')` -- call graph reveals all reachable programs
+
+### What Source Code Reveals That Black-Box Cannot
+
+| Source finding | Black-box equivalent | Time saved |
+|---|---|---|
+| Hardcoded PIN `VALUE 1337` | Brute force 0000-9999 (10,000 attempts at 1s = ~3 hours) | ~3 hours |
+| `IF EIBAID = DFHPA3` handler | Test all 27 AID keys on every screen | Minutes to hours |
+| DRK hidden field with FSET | `analyze_hidden()` finds the field, but not its purpose | Understanding |
+| DELETE without auth check | Must discover by trial (and possibly cause data loss) | Risk avoidance |
+| PCT transaction list | `fuzz_transaction_codes()` with 1,296+ attempts | ~20 minutes |
+
+### Constructing Precision Exploits
+
+Once you have a source-code finding, build the smallest possible exploit to verify it:
+
+```
+Source: SUPERVISOR-CODE PIC 9(4) VALUE 1337
+Exploit: send_field_data(text="1337", field_address=pin_addr)
+Result: One call, confirmed in 1 second
+
+Source: CANBUY-FLAGI ATTRB=(NORM,PROT,FSET,DRK) with value 'N'
+Exploit: send_fields_data with CANBUY flipped to 'Y' plus BUY action
+Result: Purchase restriction bypassed in 1 packet
+
+Source: IF EIBAID = DFHPA3 THEN XCTL PROGRAM('MCSCRT')
+Exploit: send_aid_key(key="PA3")
+Result: Hidden screen reached in 1 action
+```
+
+### Reporting with Source Evidence
+
+When Endevor was used, each finding in the report should include:
+- **Source evidence**: The specific COBOL program, BMS map, and the relevant code snippet
+- **Live verification**: The hack3270 exploitation steps and screen output
+
+This produces findings with two independent evidence chains -- source-confirmed, live-verified -- which is the strongest possible pen test evidence. Auditors and developers can go directly to the source line to understand and fix the issue.
+
+### If Endevor Is Not Available
+
+Everything above is a nice-to-have. If Endevor is not available:
+- Follow the standard methodology in the skill file
+- Use `fuzz_transaction_codes()` instead of the PCT to discover transactions
+- Use `analyze_hidden()` and `get_hidden_fields()` to find hidden fields (you won't know their purpose without source)
+- Brute force PINs with `brute_force_field()` (follow rate limits in the skill file)
+- Test all AID keys manually on every screen
+- Fuzz inputs with `fuzz_field()` and `fuzz_all_input_fields()`
+
+The vulnerability classes are the same -- it just takes longer to find them.
+
+See `skills/endevor-mcp.md` for Endevor tool reference, `skills/mainframe-security.md` for 19 vulnerability classes with COBOL patterns, and `skills/security-checklist.md` for a source code review checklist cross-referenced to hack3270 tools.

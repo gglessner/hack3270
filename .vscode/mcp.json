@@ -1,9 +1,23 @@
 {
   "servers": {
     "hack3270": {
-      "command": "python3",
+      "command": "${command:python.interpreterPath}",
       "args": ["MCPs/hack3270_mcp/hack3270_mcp.py"],
       "cwd": "${workspaceFolder}"
+    },
+    "endevor-mcp": {
+      "command": "${command:python.interpreterPath}",
+      "args": ["MCPs/run_endevor_mcp.py"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "ENDEVOR_HOST": "localhost",
+        "ENDEVOR_PORT": "8042",
+        "ENDEVOR_DATASOURCE": "DVCA",
+        "ENDEVOR_USERNAME": "DVCA01",
+        "ENDEVOR_PASSWORD": "password",
+        "ENDEVOR_USE_SSL": "false",
+        "ENDEVOR_SSL_NO_VERIFY": "true"
+      }
     }
   }
 }

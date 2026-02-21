@@ -1,5 +1,32 @@
 # Changelog
 
+## Version 2.7.0
+
+### Endevor-MCP Integration: Source-Informed Pen Testing
+
+Added a companion **Endevor-MCP** server that provides read-only access to Broadcom Endevor SCM, enabling AI agents to retrieve COBOL source, BMS maps, and system tables during live pen testing. When used alongside hack3270, this transforms the assessment methodology from blind black-box testing to **source-informed, live-verified** testing.
+
+#### Endevor-MCP Server
+- Read-only interaction with Endevor REST API v2
+- Browse inventory: environments, systems, subsystems, types, elements
+- Retrieve source code for COBOL programs, BMS maps, system tables (PCT, PPT, FCT), CLISTs
+- Pre-configured `auto` connection when `ENDEVOR_HOST` environment variables are set
+- MCP configuration included in `.cursor/mcp.json` and `.vscode/mcp.json`
+
+#### hack3270 Skill Updates
+- **New Phase 2A: Endevor-Enhanced Testing** -- complete methodology for parallel source analysis and live verification. Retrieve COBOL, BMS, and system tables while navigating screens with hack3270. Verify every source-code finding live.
+- **Deferred TSO escape** -- documented that routing field corruption may not trigger immediately; pressing navigation PF keys (PF5, PF3) after field modification can produce a deferred `READY` prompt
+- **TIME output buffering** -- added guidance that TSO `TIME` output may require CLEAR to display
+- **KICKS recovery sequence** -- explicit steps to return from TSO to KICKS without using LOGOFF (which strands the terminal)
+- **`send_fields_data` field inclusion warning** -- critical note that only explicitly specified fields are sent; FSET/PROT fields must be manually included in the payload
+- **`fuzz_field` category filter caveat** -- warning that the tool may send payloads from all categories regardless of the `categories` parameter
+- **CLEAR key trapping** -- note that some COBOL programs intercept CLEAR and redisplay; suggests PF3 as alternative exit
+
+#### Performance Impact
+Endevor-enhanced methodology reduced a full DVCA application pen test from ~8.5 minutes to ~4.5 minutes (46% faster) with identical vulnerability coverage (8 findings, 3 positive controls). Source analysis eliminates blind brute forcing, systematic AID key scanning, and guess-and-check fuzzing -- the AI reads the vulnerability in source and verifies it in one shot.
+
+---
+
 ## Version 2.6.7
 
 ### Bug Fixes and New Features
