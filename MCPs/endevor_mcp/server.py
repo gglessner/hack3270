@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Endevor-MCP Server v1.0.0 (Read-Only)
+Endevor-MCP Server v1.1.0 (Read-Only)
 
 Read-only MCP server providing AI-driven Endevor SCM interaction via the
 Endevor REST API v2. Supports Basic Auth, Bearer Token (JWT), and TLS.
@@ -44,6 +44,8 @@ from endevor_mcp.client import ConnectionManager, EndevorConnection
 # Initialize
 # =====================================================================
 
+DEBUG = os.environ.get("ENDEVOR_DEBUG", "").strip().lower() in ("true", "1", "yes")
+
 conn_mgr = ConnectionManager()
 atexit.register(conn_mgr.shutdown_all)
 
@@ -51,10 +53,19 @@ mcp = FastMCP(
     "Endevor-MCP",
     instructions=(
         "Endevor-MCP provides read-only interaction with Broadcom Endevor SCM "
-        "via the REST API v2. If ENDEVOR_HOST environment variables were "
-        "configured, connection 'auto' is pre-established — use conn_id='auto' "
-        "immediately. Otherwise: endevor_connect -> browse inventory with "
-        "endevor_list_* tools -> retrieve/print elements -> endevor_disconnect. "
+        "via the REST API v2.\n\n"
+        "IMPORTANT: The connection is ALREADY established and authenticated "
+        "at startup. Do NOT call endevor_connect — it is not needed. "
+        "All tools default to the pre-configured connection.\n\n"
+        "Start by browsing the inventory:\n"
+        "  1. endevor_list_environments()\n"
+        "  2. endevor_list_stages(environment='ENV')\n"
+        "  3. endevor_list_systems(environment='ENV', stage='1')\n"
+        "  4. endevor_list_elements(environment='ENV', stage='1', "
+        "system='SYS', subsystem='SUB', type_name='COBOL')\n"
+        "  5. endevor_retrieve_element(...) to get source code\n\n"
+        "If authentication expires, call endevor_authenticate() to refresh "
+        "the JWT token.\n\n"
         "This is a read-only server: no add, update, delete, move, generate, "
         "sign-out, package mutation, or SCL submission tools are available."
     ),
@@ -92,15 +103,16 @@ def _auto_connect():
 
     use_ssl = port == 443 or os.environ.get("ENDEVOR_USE_SSL", "true").strip().lower() not in ("false", "0", "no")
 
-    print(
-        f"[Endevor-MCP] Auto-connect config:\n"
-        f"  host={host} port={port} datasource={datasource}\n"
-        f"  username={'(set)' if username else '(NOT SET)'}\n"
-        f"  password={'(set, len=' + str(len(password)) + ')' if password else '(NOT SET)'}\n"
-        f"  bearer_token={'(set)' if bearer_token else '(not set)'}\n"
-        f"  use_ssl={use_ssl} ssl_no_verify={ssl_no_verify}",
-        file=sys.stderr,
-    )
+    if DEBUG:
+        print(
+            f"[Endevor-MCP] Auto-connect config:\n"
+            f"  host={host} port={port} datasource={datasource}\n"
+            f"  username={'(set)' if username else '(NOT SET)'}\n"
+            f"  password={'(set, len=' + str(len(password)) + ')' if password else '(NOT SET)'}\n"
+            f"  bearer_token={'(set)' if bearer_token else '(not set)'}\n"
+            f"  use_ssl={use_ssl} ssl_no_verify={ssl_no_verify}",
+            file=sys.stderr,
+        )
 
     try:
         conn_id, conn = conn_mgr.create(
@@ -112,54 +124,51 @@ def _auto_connect():
             reject_unauthorized=reject_unauthorized,
         )
         result = conn.connect()
-        print(
-            f"[Endevor-MCP] Auto-connected to {host}:{port} "
-            f"(conn_id='auto', datasource='{datasource}')",
-            file=sys.stderr,
-        )
 
         if username and password and datasource:
             auth_result = conn.authenticate()
-            print(
-                f"[Endevor-MCP] authenticate() returned: {auth_result}",
-                file=sys.stderr,
-            )
+            if DEBUG:
+                print(
+                    f"[Endevor-MCP] authenticate() returned: {auth_result}",
+                    file=sys.stderr,
+                )
             if auth_result.get("status") == "authenticated":
                 print(
-                    "[Endevor-MCP] JWT token obtained — Bearer auth active",
+                    f"[Endevor-MCP] Connected to {host}:{port} "
+                    f"(datasource={datasource}, auth=JWT)",
                     file=sys.stderr,
                 )
             else:
                 print(
-                    f"[Endevor-MCP] JWT auth attempted but: {auth_result.get('status', 'unknown')} "
-                    f"— falling back to Basic Auth",
+                    f"[Endevor-MCP] Connected to {host}:{port} "
+                    f"(datasource={datasource}, auth=Basic — JWT failed: "
+                    f"{auth_result.get('status', 'unknown')})",
                     file=sys.stderr,
                 )
         else:
             print(
-                f"[Endevor-MCP] Skipping JWT auth: "
-                f"username={'yes' if username else 'NO'} "
-                f"password={'yes' if password else 'NO'} "
-                f"datasource={'yes' if datasource else 'NO'}",
+                f"[Endevor-MCP] Connected to {host}:{port} "
+                f"(datasource={datasource}, auth=none)",
                 file=sys.stderr,
             )
     except Exception as e:
-        import traceback
         print(f"[Endevor-MCP] Auto-connect failed: {e}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
+        if DEBUG:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
 
 # =====================================================================
 # Helpers
 # =====================================================================
 
-def _get_conn(conn_id: str) -> EndevorConnection:
+def _get_conn(conn_id: str = "auto") -> EndevorConnection:
     """Get a connected connection or raise helpful error."""
     conn = conn_mgr.get(conn_id)
     if not conn.connected:
         raise ConnectionError(
             f"Connection '{conn_id}' exists but is not connected. "
-            f"Call endevor_connect again."
+            f"The MCP may need to be restarted."
         )
     return conn
 
@@ -271,19 +280,13 @@ def endevor_connect(
     reject_unauthorized: bool = True,
     timeout: float = 60.0,
 ) -> str:
-    """Connect to an Endevor REST API instance.
+    """(Advanced) Connect to an additional Endevor REST API instance.
 
-    Establishes a persistent HTTP session to the Endevor web services
-    endpoint. The connection persists across tool calls until
-    endevor_disconnect is called.
-
-    Authentication Methods:
-        - Basic Auth: Provide username and password
-        - Bearer Token: Provide a pre-obtained JWT token
-        - None: Connect without auth (limited operations)
-
-    After connecting, use endevor_authenticate to obtain a JWT token
-    from the /auth endpoint if needed.
+    NOTE: You normally do NOT need this tool. A connection is already
+    established automatically at startup via environment variables.
+    Use the other tools directly — they default to the pre-configured
+    connection. Only use this tool to connect to a SECOND Endevor
+    instance that is different from the one already configured.
 
     Args:
         host: Endevor web services hostname or IP
@@ -338,16 +341,11 @@ def endevor_connect(
             lines.append(f"  Datasources   : {result['datasources_found']} found")
         if not result.get("authenticated"):
             lines.append(
-                "\n  WARNING: No credentials provided. You must call "
-                "endevor_authenticate with username and password before "
-                "any authenticated operations will work."
+                "\n  NOTE: No credentials provided. Call "
+                "endevor_authenticate(conn_id='" + conn_id + "', "
+                "username='...', password='...') to authenticate."
             )
-        lines.append(f"\nUse connection ID '{conn_id}' for subsequent operations.")
-        if result.get("authenticated") and result.get("auth_method") == "basic":
-            lines.append(
-                f"Call endevor_authenticate(conn_id='{conn_id}') to obtain "
-                f"a JWT token for Bearer auth."
-            )
+        lines.append(f"\nUse conn_id='{conn_id}' for subsequent operations.")
         return "\n".join(lines)
     except Exception as e:
         conn_mgr.remove(conn_id)
@@ -355,11 +353,11 @@ def endevor_connect(
 
 
 @mcp.tool()
-def endevor_disconnect(conn_id: str) -> str:
+def endevor_disconnect(conn_id: str = "auto") -> str:
     """Disconnect from an Endevor REST API instance.
 
     Args:
-        conn_id: Connection ID from endevor_connect
+        conn_id: Connection ID (default: auto)
     """
     result = conn_mgr.remove(conn_id)
     return (
@@ -374,7 +372,7 @@ def endevor_connections() -> str:
     """List all active Endevor connections with status."""
     conns = conn_mgr.list_all()
     if not conns:
-        return "No active connections. Use endevor_connect to establish one."
+        return "No active connections. The MCP may need to be restarted."
     lines = ["Active Endevor Connections:\n"]
     for c in conns:
         if c["authenticated"]:
@@ -400,20 +398,20 @@ def endevor_connections() -> str:
 
 @mcp.tool()
 def endevor_authenticate(
-    conn_id: str,
+    conn_id: str = "auto",
     username: str = "",
     password: str = "",
 ) -> str:
-    """Obtain a JWT authentication token from Endevor.
+    """Refresh the JWT authentication token.
 
-    Calls the /{datasource}/auth endpoint to get a JWT token.
-    Credentials can be provided here if they were not set at connect time.
-    The token is automatically applied to all subsequent requests.
+    Normally authentication happens automatically at startup.
+    Call this only if a request fails with HTTP 401 (token expired).
+    The new token is automatically applied to all subsequent requests.
 
     Args:
-        conn_id: Connection ID from endevor_connect
-        username: Username for Basic Auth (overrides connect-time value)
-        password: Password for Basic Auth (overrides connect-time value)
+        conn_id: Connection ID (default: auto)
+        username: Username (only if overriding stored credentials)
+        password: Password (only if overriding stored credentials)
     """
     conn = _get_conn(conn_id)
     result = conn.authenticate(
@@ -434,14 +432,14 @@ def endevor_authenticate(
 
 
 @mcp.tool()
-def endevor_healthcheck(conn_id: str) -> str:
-    """Run a health check on an Endevor datasource.
+def endevor_healthcheck(conn_id: str = "auto") -> str:
+    """Run a health check on the Endevor datasource.
 
     Validates that the datasource configuration is correct and the
     Endevor instance is reachable.
 
     Args:
-        conn_id: Connection ID from endevor_connect
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     resp = conn.get("/check")
@@ -449,15 +447,15 @@ def endevor_healthcheck(conn_id: str) -> str:
 
 
 @mcp.tool()
-def endevor_get_report(conn_id: str, report_name: str) -> str:
+def endevor_get_report(report_name: str, conn_id: str = "auto") -> str:
     """Get a report from a previous Endevor request.
 
     Reports are generated by various Endevor actions and can be
     retrieved using the report file name.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         report_name: Report file name (from action response)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     resp = conn.get(f"/reports/{report_name}", accept="text/plain")
@@ -466,8 +464,8 @@ def endevor_get_report(conn_id: str, report_name: str) -> str:
 
 @mcp.tool()
 def endevor_list_tasks(
-    conn_id: str,
     status: str = "",
+    conn_id: str = "auto",
 ) -> str:
     """List asynchronous tasks submitted by the current user.
 
@@ -475,8 +473,8 @@ def endevor_list_tasks(
     when requests use the X-Broadcom-Asynchronous header.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         status: Filter by task status: INP (in-progress), FIN (finished)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(status=status)
@@ -486,14 +484,14 @@ def endevor_list_tasks(
 
 @mcp.tool()
 def endevor_get_task_status(
-    conn_id: str,
     task_id: str,
+    conn_id: str = "auto",
 ) -> str:
     """Get the status of an asynchronous task.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         task_id: Task ID returned from an async request
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     resp = conn.get(f"/tasks/{task_id}")
@@ -502,8 +500,8 @@ def endevor_get_task_status(
 
 @mcp.tool()
 def endevor_get_task_result(
-    conn_id: str,
     task_id: str,
+    conn_id: str = "auto",
 ) -> str:
     """Get the result of a finished asynchronous task.
 
@@ -511,8 +509,8 @@ def endevor_get_task_result(
     status if still in progress.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         task_id: Task ID returned from an async request
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     resp = conn.get(f"/tasks/{task_id}/result")
@@ -524,14 +522,14 @@ def endevor_get_task_result(
 # =====================================================================
 
 @mcp.tool()
-def endevor_list_datasources(conn_id: str) -> str:
+def endevor_list_datasources(conn_id: str = "auto") -> str:
     """List all available Endevor datasource configurations.
 
     Returns the configuration details of all datasources defined
     on the Endevor web services server.
 
     Args:
-        conn_id: Connection ID from endevor_connect
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     resp = conn._do_request("GET", "/")
@@ -540,20 +538,20 @@ def endevor_list_datasources(conn_id: str) -> str:
 
 @mcp.tool()
 def endevor_list_environments(
-    conn_id: str,
     environment: str = "*",
     path: str = "",
     search: str = "",
     return_opt: str = "",
+    conn_id: str = "auto",
 ) -> str:
-    """List Endevor environments.
+    """List Endevor environments. Call this first to discover available environments.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name filter (wildcard * supported, default: all)
         path: Mapping path option (LOG or PHY)
         search: Search up the map (yes/no)
         return_opt: Return option (FIR=first found, ALL=return all)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
@@ -563,22 +561,22 @@ def endevor_list_environments(
 
 @mcp.tool()
 def endevor_list_stages(
-    conn_id: str,
     environment: str = "*",
     stage: str = "*",
     path: str = "",
     search: str = "",
     return_opt: str = "",
+    conn_id: str = "auto",
 ) -> str:
-    """List Endevor stage numbers.
+    """List Endevor stage numbers within an environment.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name (wildcard supported)
         stage: Stage number filter (wildcard supported, default: all)
         path: Mapping path option (LOG or PHY)
         search: Search up the map (yes/no)
         return_opt: Return option (FIR/ALL)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
@@ -588,24 +586,24 @@ def endevor_list_stages(
 
 @mcp.tool()
 def endevor_list_systems(
-    conn_id: str,
     environment: str = "*",
     stage: str = "*",
     system: str = "*",
     path: str = "",
     search: str = "",
     return_opt: str = "",
+    conn_id: str = "auto",
 ) -> str:
-    """List Endevor systems.
+    """List Endevor systems within an environment/stage.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name (wildcard supported)
         stage: Stage number (wildcard supported)
         system: System name filter (wildcard supported, default: all)
         path: Mapping path option (LOG or PHY)
         search: Search up the map (yes/no)
         return_opt: Return option (FIR/ALL)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
@@ -615,7 +613,6 @@ def endevor_list_systems(
 
 @mcp.tool()
 def endevor_list_subsystems(
-    conn_id: str,
     environment: str = "*",
     stage: str = "*",
     system: str = "*",
@@ -623,11 +620,11 @@ def endevor_list_subsystems(
     path: str = "",
     search: str = "",
     return_opt: str = "",
+    conn_id: str = "auto",
 ) -> str:
-    """List Endevor subsystems.
+    """List Endevor subsystems within a system.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name (wildcard supported)
         stage: Stage number (wildcard supported)
         system: System name (wildcard supported)
@@ -635,6 +632,7 @@ def endevor_list_subsystems(
         path: Mapping path option (LOG or PHY)
         search: Search up the map (yes/no)
         return_opt: Return option (FIR/ALL)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
@@ -644,7 +642,6 @@ def endevor_list_subsystems(
 
 @mcp.tool()
 def endevor_list_types(
-    conn_id: str,
     environment: str = "*",
     stage: str = "*",
     system: str = "*",
@@ -652,11 +649,11 @@ def endevor_list_types(
     path: str = "",
     search: str = "",
     return_opt: str = "",
+    conn_id: str = "auto",
 ) -> str:
-    """List Endevor element types.
+    """List Endevor element types within a system.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name (wildcard supported)
         stage: Stage number (wildcard supported)
         system: System name (wildcard supported)
@@ -664,6 +661,7 @@ def endevor_list_types(
         path: Mapping path option (LOG or PHY)
         search: Search up the map (yes/no)
         return_opt: Return option (FIR/ALL)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
@@ -673,7 +671,6 @@ def endevor_list_types(
 
 @mcp.tool()
 def endevor_list_elements(
-    conn_id: str,
     environment: str = "*",
     stage: str = "*",
     system: str = "*",
@@ -688,14 +685,14 @@ def endevor_list_elements(
     where_ccid_retrieve: str = "",
     where_proc_group: str = "",
     limit: int = 0,
+    conn_id: str = "auto",
 ) -> str:
-    """List Endevor elements.
+    """List Endevor elements (source code members).
 
     Browse the Endevor inventory to find elements matching your criteria.
     Supports wildcards in all path segments.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name (wildcard supported)
         stage: Stage number (wildcard supported)
         system: System name (wildcard supported)
@@ -710,6 +707,7 @@ def endevor_list_elements(
         where_ccid_retrieve: Filter by retrieve CCID
         where_proc_group: Filter by processor group (comma-separated)
         limit: Max number of elements to return (0 = no limit)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(
@@ -732,24 +730,24 @@ def endevor_list_elements(
 
 @mcp.tool()
 def endevor_list_members(
-    conn_id: str,
     environment: str,
     stage: str,
     system: str,
     subsystem: str,
     type_name: str,
     member: str = "*",
+    conn_id: str = "auto",
 ) -> str:
     """List members for an Endevor element type.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name
         stage: Stage number
         system: System name
         subsystem: Subsystem name
         type_name: Element type name
         member: Member name filter (wildcard supported)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     resp = conn.get(
@@ -765,7 +763,6 @@ def endevor_list_members(
 
 @mcp.tool()
 def endevor_retrieve_element(
-    conn_id: str,
     environment: str,
     stage: str,
     system: str,
@@ -778,13 +775,13 @@ def endevor_retrieve_element(
     expand_includes: str = "",
     source_charset: str = "",
     accept_charset: str = "",
+    conn_id: str = "auto",
 ) -> str:
-    """Retrieve (download) an element's source from Endevor.
+    """Retrieve (download) an element's source code from Endevor.
 
     Returns the element's source content in the response body.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name
         stage: Stage number
         system: System name
@@ -797,6 +794,7 @@ def endevor_retrieve_element(
         expand_includes: Expand INCLUDE statements (yes/no)
         source_charset: EBCDIC charset for translation
         accept_charset: Desired response character set
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     path = _element_path(environment, stage, system, subsystem, type_name, element)
@@ -837,7 +835,6 @@ def endevor_retrieve_element(
 
 @mcp.tool()
 def endevor_print_element(
-    conn_id: str,
     environment: str,
     stage: str,
     system: str,
@@ -854,6 +851,7 @@ def endevor_print_element(
     where_ccid_current: str = "",
     where_ccid_all: str = "",
     where_proc_group: str = "",
+    conn_id: str = "auto",
 ) -> str:
     """Print element information (browse, changes, history, summary, master, listing).
 
@@ -861,7 +859,6 @@ def endevor_print_element(
     history, or master control file data.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name
         stage: Stage number
         system: System name
@@ -878,6 +875,7 @@ def endevor_print_element(
         where_ccid_current: Filter by CCID in MCF
         where_ccid_all: Filter by CCID in MCF and deltas
         where_proc_group: Filter by processor group
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     path = _element_path(environment, stage, system, subsystem, type_name, element)
@@ -895,7 +893,6 @@ def endevor_print_element(
 
 @mcp.tool()
 def endevor_print_element_components(
-    conn_id: str,
     environment: str,
     stage: str,
     system: str,
@@ -911,6 +908,7 @@ def endevor_print_element_components(
     where_ccid_current: str = "",
     where_ccid_all: str = "",
     where_proc_group: str = "",
+    conn_id: str = "auto",
 ) -> str:
     """Print element component information (requires Endevor ACM option).
 
@@ -918,7 +916,6 @@ def endevor_print_element_components(
     Supports browse, changes, history, and summary views.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         environment: Environment name
         stage: Stage number
         system: System name
@@ -934,6 +931,7 @@ def endevor_print_element_components(
         where_ccid_current: Filter by CCID in MCF
         where_ccid_all: Filter by CCID in MCF and deltas
         where_proc_group: Filter by processor group
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     path = _element_path(environment, stage, system, subsystem, type_name, element)
@@ -955,7 +953,6 @@ def endevor_print_element_components(
 
 @mcp.tool()
 def endevor_list_packages(
-    conn_id: str,
     package: str = "*",
     status: str = "",
     pkg_type: str = "",
@@ -966,6 +963,7 @@ def endevor_list_packages(
     approver: str = "",
     detail: str = "",
     limit: int = 0,
+    conn_id: str = "auto",
 ) -> str:
     """List Endevor packages.
 
@@ -974,7 +972,6 @@ def endevor_list_packages(
     or approver information for a specific package.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         package: Package name filter (wildcard supported, default: all)
         status: Filter by status (comma-separated): INEDIT, INAPPROVAL,
                 APPROVED, INEXECUTION, EXECUTED, COMMITTED, DENIED, EXECFAILED
@@ -986,6 +983,7 @@ def endevor_list_packages(
         approver: Filter by approver ID
         detail: Detail view for specific package: SCL, Action, Ship, Approver
         limit: Max number of packages to return (0 = no limit)
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(
@@ -1011,8 +1009,8 @@ def endevor_list_packages(
 
 @mcp.tool()
 def endevor_validate_fingerprint(
-    conn_id: str,
     fingerprints: str,
+    conn_id: str = "auto",
 ) -> str:
     """Validate element fingerprints in Endevor.
 
@@ -1020,12 +1018,12 @@ def endevor_validate_fingerprint(
     Useful for optimistic concurrency control.
 
     Args:
-        conn_id: Connection ID from endevor_connect
         fingerprints: JSON array of fingerprint objects, each containing:
             elmName, envName, stgNum, sysName, sbsName, typeName, fingerprint
             Example: [{"elmName":"ELEM1","envName":"DEV","stgNum":"1",
             "sysName":"SYS","sbsName":"SUB","typeName":"COBOL",
             "fingerprint":"0123456789ABCDEF"}]
+        conn_id: Connection ID (default: auto)
     """
     conn = _get_conn(conn_id)
     try:

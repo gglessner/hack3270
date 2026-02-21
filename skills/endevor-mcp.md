@@ -5,76 +5,141 @@ description: Read-only interaction with Broadcom Endevor SCM via the Endevor-MCP
 
 # Endevor-MCP: Endevor REST API v2 Integration
 
-22 read-only MCP tools for Endevor SCM interaction via the REST API v2. Designed for AI-driven source code review and security assessments. This server is intentionally read-only — no write operations are available.
+## CRITICAL: DO NOT CALL endevor_connect
 
-## Quick Start
+The connection is **already established and authenticated** when the MCP starts.
+You do **NOT** need to connect. You do **NOT** need to authenticate.
+Just start calling tools directly. All tools default to the pre-configured connection.
 
-**If `ENDEVOR_*` env vars are configured in `.cursor/mcp.json`**, connection `auto` is pre-established. Use `conn_id="auto"` immediately — no `endevor_connect` call needed:
-
+**WRONG — never do this:**
 ```
-endevor_list_environments(conn_id="auto")
-endevor_list_elements(conn_id="auto", environment="DEV", stage="1",
-                      system="FINANCE", subsystem="ACCTS", type_name="COBOL")
-endevor_retrieve_element(conn_id="auto", environment="DEV", stage="1",
-                         system="FINANCE", subsystem="ACCTS", type_name="COBOL",
-                         element="PAYCALC")
+endevor_connect(host="...", ...)       # WRONG - do not call this
+endevor_authenticate(conn_id="auto")   # WRONG - already authenticated
 ```
 
-**Manual connect** (if env vars are not configured, or connecting to a second instance):
+**RIGHT — just start using tools:**
+```
+endevor_list_environments()
+endevor_list_elements(environment="DEV", stage="1", system="SYS", subsystem="SUB", type_name="COBOL")
+endevor_retrieve_element(environment="DEV", stage="1", system="SYS", subsystem="SUB", type_name="COBOL", element="MYPROG")
+```
+
+The only time you should call `endevor_authenticate()` is if a request fails
+with HTTP 401, meaning the JWT token has expired. Then call
+`endevor_authenticate()` (no arguments needed) to refresh it.
+
+## Finding Source Code
+
+### 1. Element path provided (fastest — preferred)
+
+The application team typically provides the Endevor element path for the
+application under test. If the user gives you an element path (environment,
+stage, system, subsystem, type), go directly to listing and retrieving:
 
 ```
-endevor_connect(host="mainframe.example.com", port=443, datasource="ENDVCONF",
-                username="USER01", password="secret")
-# Then use conn_id="conn-1"
+# List all elements at the provided path:
+endevor_list_elements(environment="PROD", stage="1", system="FINANCE",
+                      subsystem="ACCTS", type_name="COBOL")
+
+# Retrieve a specific element:
+endevor_retrieve_element(environment="PROD", stage="1", system="FINANCE",
+                         subsystem="ACCTS", type_name="COBOL", element="PAYCALC")
+```
+
+Ask the user for the element path if they haven't provided one. App teams
+always know their Endevor location.
+
+### 2. Search by name (when you know a program/transaction name)
+
+Use context from the pen test (transaction names, program names from screens,
+error messages) to search directly with wildcards:
+
+```
+endevor_list_elements(element="MCGM*")
+endevor_list_elements(type_name="COBOL", element="PAY*")
+endevor_list_elements(type_name="BMS", element="CSGM*")
+```
+
+### 3. Hierarchy walk (last resort — REQUIRES HUMAN APPROVAL)
+
+**You MUST ask the user for permission before walking the Endevor hierarchy.**
+Large environments have thousands of systems and tens of thousands of elements.
+An unscoped hierarchy walk can produce overwhelming output and waste time.
+
+Before calling `endevor_list_environments()`, `endevor_list_systems()`, or
+any broad wildcard list, tell the user what you intend to do and wait for
+explicit approval. Example: "I don't have an element path or program name.
+Can I browse the Endevor inventory to find the application source code?"
+
+## Step-by-Step Hierarchy Walk (for targeted browsing)
+
+Follow this sequence. Each step's output tells you what values to use in the next step:
+
+```
+Step 1: endevor_list_environments()
+        → returns environment names like DEV, QA, PROD
+
+Step 2: endevor_list_stages(environment="DEV")
+        → returns stage numbers like 1, 2
+
+Step 3: endevor_list_systems(environment="DEV", stage="1")
+        → returns system names like FINANCE, HR
+
+Step 4: endevor_list_subsystems(environment="DEV", stage="1", system="FINANCE")
+        → returns subsystem names like ACCTS, PAYROLL
+
+Step 5: endevor_list_types(environment="DEV", stage="1", system="FINANCE")
+        → returns type names like COBOL, COPYBOOK, JCL, BMS
+
+Step 6: endevor_list_elements(environment="DEV", stage="1", system="FINANCE",
+                              subsystem="ACCTS", type_name="COBOL")
+        → returns element names like PAYCALC, EMPRPT
+
+Step 7: endevor_retrieve_element(environment="DEV", stage="1", system="FINANCE",
+                                 subsystem="ACCTS", type_name="COBOL",
+                                 element="PAYCALC")
+        → returns the actual source code
+```
+
+You can skip steps and use wildcards (`*`) to search broadly:
+```
+endevor_list_elements(environment="*", stage="*", system="*",
+                      subsystem="*", type_name="COBOL", element="PAY*")
 ```
 
 ## Authentication
 
-The server supports auto-authentication via environment variables. When `ENDEVOR_HOST`, `ENDEVOR_USERNAME`, `ENDEVOR_PASSWORD`, and `ENDEVOR_DATASOURCE` are set in `.cursor/mcp.json`, the server automatically connects with Basic Auth and calls the `/auth` endpoint to obtain a JWT bearer token. All subsequent API calls use the JWT.
-
-| Method | Configuration |
-|--------|-------------|
-| Auto (env vars) | Set `ENDEVOR_HOST`, `ENDEVOR_USERNAME`, `ENDEVOR_PASSWORD`, `ENDEVOR_DATASOURCE` in mcp.json `env` |
-| Basic Auth | `endevor_connect(username="...", password="...")` |
-| Bearer Token | `endevor_connect(bearer_token="...")` (pre-obtained JWT) |
-| JWT via API | Connect with Basic Auth, then call `endevor_authenticate` |
-| mTLS | `ssl_certfile`, `ssl_keyfile` (or `ENDEVOR_SSL_CERTFILE`, `ENDEVOR_SSL_KEYFILE`) |
-| No verify (test) | `ssl_no_verify=True` (or `ENDEVOR_SSL_NO_VERIFY=true`) |
-| Custom CA | `ssl_cafile="/path/to/ca.pem"` (or `ENDEVOR_SSL_CAFILE`) |
-
-### Environment Variables
+Authentication is handled automatically via environment variables configured
+in `.cursor/mcp.json`. When the MCP starts, it reads `ENDEVOR_HOST`,
+`ENDEVOR_USERNAME`, `ENDEVOR_PASSWORD`, and `ENDEVOR_DATASOURCE`, connects,
+and obtains a JWT bearer token. All subsequent API calls use the JWT.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ENDEVOR_HOST` | Yes (for auto) | Endevor web services hostname |
+| `ENDEVOR_HOST` | Yes | Endevor web services hostname |
 | `ENDEVOR_PORT` | No (default: 443) | Port number |
-| `ENDEVOR_DATASOURCE` | Yes (for JWT) | Datasource/configuration name |
-| `ENDEVOR_USERNAME` | Yes (for auth) | Basic Auth username |
-| `ENDEVOR_PASSWORD` | Yes (for auth) | Basic Auth password |
-| `ENDEVOR_BEARER_TOKEN` | No | Pre-obtained JWT (alternative to user/pass) |
+| `ENDEVOR_DATASOURCE` | Yes | Datasource/configuration name |
+| `ENDEVOR_USERNAME` | Yes | Username |
+| `ENDEVOR_PASSWORD` | Yes | Password |
 | `ENDEVOR_BASE_PATH` | No | REST API base path (default: /EndevorService/api/v2) |
 | `ENDEVOR_SSL_NO_VERIFY` | No | Skip SSL verification (true/false) |
-| `ENDEVOR_SSL_CAFILE` | No | CA certificate file path |
-| `ENDEVOR_SSL_CERTFILE` | No | Client certificate for mTLS |
-| `ENDEVOR_SSL_KEYFILE` | No | Client private key for mTLS |
 | `ENDEVOR_USE_SSL` | No | Use HTTPS (default: true) |
-| `ENDEVOR_REJECT_UNAUTHORIZED` | No | Reject unauthorized certs (default: true) |
 
 ## Complete Tool Reference (22 read-only tools)
 
-### Connection Management (3 tools)
+### Connection Management (3 tools — rarely needed)
 
 | Tool | Purpose |
 |------|---------|
-| `endevor_connect` | Connect to Endevor REST API with full auth support |
-| `endevor_disconnect` | Close connection |
-| `endevor_connections` | List active connections |
+| `endevor_connect` | (Advanced) Connect to a SECOND Endevor instance. Do NOT call for normal use. |
+| `endevor_disconnect` | Close a connection |
+| `endevor_connections` | List active connections and their status |
 
 ### Authentication & Health (3 tools)
 
 | Tool | Purpose |
 |------|---------|
-| `endevor_authenticate` | Get JWT token from /auth endpoint |
+| `endevor_authenticate` | Refresh JWT token (only if HTTP 401 occurs) |
 | `endevor_healthcheck` | Run datasource health check |
 | `endevor_get_report` | Get report from previous request |
 
@@ -91,7 +156,7 @@ The server supports auto-authentication via environment variables. When `ENDEVOR
 | Tool | Purpose |
 |------|---------|
 | `endevor_list_datasources` | List all datasource configurations |
-| `endevor_list_environments` | List environments (DEV, QA, PROD, etc.) |
+| `endevor_list_environments` | List environments (DEV, QA, PROD, etc.) — **start here** |
 | `endevor_list_stages` | List stage numbers within environments |
 | `endevor_list_systems` | List systems (application groups) |
 | `endevor_list_subsystems` | List subsystems within systems |
@@ -151,34 +216,22 @@ All list tools support wildcards (`*`) in path segments. Use `*` to browse broad
 
 Note: Exact type names vary by installation. Use `endevor_list_types` to discover what's configured.
 
-## Parameter Reference
+## When to Use Which Tool
 
-### Common Parameters (All Element Tools)
+| Task | Tool |
+|------|------|
+| First-time inventory exploration | `endevor_list_environments` -> `_stages` -> `_systems` -> `_subsystems` -> `_types` -> `_elements` |
+| Get element source code | `endevor_retrieve_element` |
+| See who changed what | `endevor_print_element` with `print_option="summary"` or `"changes"` |
+| See element metadata (dates, signout, processor) | `endevor_print_element` with `print_option="master"` |
+| See full source with level annotations | `endevor_print_element` with `print_option="browse"` |
+| Find elements by change ticket | `endevor_list_elements` with `where_ccid_all="TICKET"` |
+| See element dependencies | `endevor_print_element_components` |
+| Track pending changes | `endevor_list_packages` with `status="APPROVED,INAPPROVAL"` |
+| See what a package will do | `endevor_list_packages` with `detail="SCL"` |
+| Monitor long-running operations | `endevor_list_tasks` -> `endevor_get_task_status` -> `endevor_get_task_result` |
 
-| Parameter | Description |
-|-----------|-------------|
-| `conn_id` | Connection ID from `endevor_connect` |
-| `environment` | Endevor environment name (DEV, QA, PROD) |
-| `stage` | Stage number (1, 2) |
-| `system` | System name (application group) |
-| `subsystem` | Subsystem name (application subdivision) |
-| `type_name` | Element type (COBOL, COPYBOOK, JCL, etc.) |
-| `element` | Element name (program name, up to 255 chars in v19+) |
-
-### Search & Filter Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `search` | Search up the Endevor map for elements (yes/no) |
-| `path` | Mapping path: LOG (logical) or PHY (physical) |
-| `return_opt` | Return option: FIR (first found) or ALL |
-| `where_ccid_current` | Filter by CCID in Master Control File |
-| `where_ccid_all` | Filter by CCID in MCF and delta levels |
-| `where_ccid_retrieve` | Filter by retrieve CCID |
-| `where_proc_group` | Filter by processor group |
-| `limit` | Max number of results (0 = no limit) |
-
-### Print Options
+## Print Options
 
 | Value | Description |
 |-------|-------------|
@@ -189,7 +242,7 @@ Note: Exact type names vary by installation. Use `endevor_list_types` to discove
 | `master` | Master Control File data (processor info, dates, signout) |
 | `listing` | Output listing from last generate (requires ACM) |
 
-### Package Statuses
+## Package Statuses
 
 | Status | Description |
 |--------|-------------|
@@ -201,62 +254,6 @@ Note: Exact type names vary by installation. Use `endevor_list_types` to discove
 | `EXECFAILED` | Execution failed |
 | `COMMITTED` | Committed (no backout possible) |
 | `DENIED` | Approval was denied |
-
-## Common Workflows
-
-### 1. Browse and Retrieve Source
-
-```
-endevor_connect(host="...", datasource="CONF1", username="...", password="...")
-endevor_list_environments(conn_id="conn-1")
-endevor_list_systems(conn_id="conn-1", environment="DEV", stage="1")
-endevor_list_subsystems(conn_id="conn-1", environment="DEV", stage="1", system="FINANCE")
-endevor_list_types(conn_id="conn-1", environment="DEV", stage="1", system="FINANCE")
-endevor_list_elements(conn_id="conn-1", environment="DEV", stage="1",
-                      system="FINANCE", subsystem="ACCTS", type_name="COBOL")
-endevor_retrieve_element(conn_id="conn-1", environment="DEV", stage="1",
-                         system="FINANCE", subsystem="ACCTS", type_name="COBOL",
-                         element="PAYCALC")
-```
-
-### 2. View Element Change History
-
-```
-endevor_print_element(conn_id="conn-1", environment="DEV", stage="1",
-    system="SYS1", subsystem="SUB1", type_name="COBOL", element="MYPROG",
-    print_option="history")
-
-endevor_print_element(conn_id="conn-1", environment="DEV", stage="1",
-    system="SYS1", subsystem="SUB1", type_name="COBOL", element="MYPROG",
-    print_option="summary")
-```
-
-### 3. Component Dependency Analysis (requires ACM)
-
-```
-endevor_print_element_components(conn_id="conn-1", environment="DEV", stage="1",
-    system="SYS1", subsystem="SUB1", type_name="COBOL", element="MYPROG",
-    print_option="browse")
-```
-
-## When to Use Which Tool
-
-| Task | Tool |
-|------|------|
-| First-time inventory exploration | `endevor_list_environments` -> `_systems` -> `_subsystems` -> `_types` -> `_elements` |
-| Get element source code | `endevor_retrieve_element` |
-| See who changed what | `endevor_print_element` with `print_option="summary"` or `"changes"` |
-| See element metadata (dates, signout, processor) | `endevor_print_element` with `print_option="master"` |
-| See full source with level annotations | `endevor_print_element` with `print_option="browse"` |
-| Find elements by change ticket | `endevor_list_elements` with `where_ccid_all="TICKET"` |
-| See element dependencies | `endevor_print_element_components` |
-| Track pending changes | `endevor_list_packages` with `status="APPROVED,INAPPROVAL"` |
-| See what a package will do | `endevor_list_packages` with `detail="SCL"` |
-| Monitor long-running operations | `endevor_list_tasks` -> `endevor_get_task_status` -> `endevor_get_task_result` |
-
-## JSON Argument Formats
-
-- `endevor_validate_fingerprint` fingerprints: `[{"elmName":"E","envName":"DEV","stgNum":"1","sysName":"SYS","sbsName":"SUB","typeName":"COBOL","fingerprint":"0123456789ABCDEF"}]`
 
 ## Additional Resources
 

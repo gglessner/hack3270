@@ -22,7 +22,7 @@ Endevor REST API v2 for inventory browsing, element retrieval and inspection,
 package listing, and fingerprint validation.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Garland Glessner"
 __email__ = "gglessner@gmail.com"
 __license__ = "GPL-3.0-or-later"

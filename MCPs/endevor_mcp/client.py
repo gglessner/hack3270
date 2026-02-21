@@ -43,8 +43,9 @@ import requests
 import urllib3
 
 # ── Debug toggle ──────────────────────────────────────────────────────
-# Set to True to log all HTTP request/response traffic to stderr.
-DEBUG_HTTP = False
+# Set ENDEVOR_DEBUG=true in the environment, or flip this to True,
+# to log all HTTP request/response traffic to stderr.
+DEBUG_HTTP = os.environ.get("ENDEVOR_DEBUG", "").strip().lower() in ("true", "1", "yes")
 
 
 def _debug(msg: str) -> None:

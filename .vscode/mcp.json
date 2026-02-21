@@ -7,7 +7,7 @@
     },
     "endevor-mcp": {
       "command": "python3",
-      "args": ["MCPs/run_endevor_mcp.py"],
+      "args": ["MCPs/endevor_mcp/run.py"],
       "cwd": "${workspaceFolder}",
       "env": {
         "ENDEVOR_HOST": "localhost",
@@ -16,7 +16,8 @@
         "ENDEVOR_USERNAME": "DVCA01",
         "ENDEVOR_PASSWORD": "password",
         "ENDEVOR_USE_SSL": "false",
-        "ENDEVOR_SSL_NO_VERIFY": "true"
+        "ENDEVOR_SSL_NO_VERIFY": "true",
+        "ENDEVOR_DEBUG": "false"
       }
     }
   }

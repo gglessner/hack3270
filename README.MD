@@ -2,7 +2,7 @@
 
 A Python 3 toolkit for manipulating TN3270 data streams, specifically designed for application penetration testing of mainframe CICS applications.
 
-**Current Version: 2.7.0** -- See [CHANGELOG.md](CHANGELOG.md) for version history.
+**Current Version: 2.8.1** -- See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Features
 

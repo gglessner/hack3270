@@ -9,6 +9,8 @@ The full skill content is located at: **`skills/endevor-mcp.md`**
 
 Read that file now using the Read tool. It covers all 22 Endevor MCP tools, authentication, inventory hierarchy, common workflows, and parameter reference.
 
+**IMPORTANT: The Endevor connection is ALREADY established and authenticated at startup. Do NOT call endevor_connect. Just start calling tools directly — they all default to the pre-configured connection.**
+
 For mainframe security assessment patterns and COBOL source code review, also read:
 - `skills/mainframe-security.md` -- 19 vulnerability classes with code patterns and exploitation steps
 - `skills/security-checklist.md` -- 10-category review checklist and hack3270 cross-reference
