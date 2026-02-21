@@ -364,18 +364,27 @@ def endevor_connections() -> str:
 # =====================================================================
 
 @mcp.tool()
-def endevor_authenticate(conn_id: str) -> str:
+def endevor_authenticate(
+    conn_id: str,
+    username: str = "",
+    password: str = "",
+) -> str:
     """Obtain a JWT authentication token from Endevor.
 
     Calls the /{datasource}/auth endpoint to get a JWT token.
-    Requires that Basic Auth credentials were provided at connect time.
-    The token is automatically applied to subsequent requests.
+    Credentials can be provided here if they were not set at connect time.
+    The token is automatically applied to all subsequent requests.
 
     Args:
         conn_id: Connection ID from endevor_connect
+        username: Username for Basic Auth (overrides connect-time value)
+        password: Password for Basic Auth (overrides connect-time value)
     """
     conn = _get_conn(conn_id)
-    result = conn.authenticate()
+    result = conn.authenticate(
+        username=username or None,
+        password=password or None,
+    )
     if result.get("status") == "authenticated":
         return (
             "Authentication successful.\n"

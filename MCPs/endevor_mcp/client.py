@@ -311,14 +311,26 @@ class EndevorConnection:
     def delete(self, path: str, **kwargs) -> requests.Response:
         return self.request("DELETE", path, **kwargs)
 
-    def authenticate(self) -> Dict[str, Any]:
+    def authenticate(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Get a JWT token from the Endevor /auth endpoint.
 
         The /auth endpoint requires Basic Auth credentials to issue a JWT.
         This method builds a Basic Auth header explicitly for the /auth
         call, then stores the JWT in self._jwt_token.  All subsequent
         requests pick up the token in _do_request() automatically.
+
+        If username/password are provided, they override (and update) the
+        stored credentials on this connection.
         """
+        if username:
+            self.username = username
+        if password:
+            self.password = password
+
         if not self.datasource:
             return {"error": "datasource is required for authentication"}
         if not self.username or not self.password:
