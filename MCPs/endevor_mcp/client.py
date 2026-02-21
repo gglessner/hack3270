@@ -34,12 +34,22 @@ Base URL pattern:
 """
 
 import os
+import sys
 import threading
 import time
 from typing import Optional, Dict, Any, Tuple
 
 import requests
 import urllib3
+
+# ── Debug toggle ──────────────────────────────────────────────────────
+# Set to True to log all HTTP request/response traffic to stderr.
+DEBUG_HTTP = False
+
+
+def _debug(msg: str) -> None:
+    if DEBUG_HTTP:
+        print(f"[ENDEVOR-DEBUG] {msg}", file=sys.stderr, flush=True)
 
 
 class EndevorConnection:
@@ -216,7 +226,23 @@ class EndevorConnection:
 
         self._request_count += 1
 
-        return self._session.request(
+        if DEBUG_HTTP:
+            _debug(f">>> {method} {url}")
+            if params:
+                _debug(f"    params: {params}")
+            if json_body:
+                _debug(f"    body: {json_body}")
+            auth_hdr = req_headers.get("Authorization") or self._session.headers.get("Authorization")
+            if auth_hdr:
+                kind = auth_hdr.split()[0] if " " in auth_hdr else auth_hdr
+                _debug(f"    auth header: {kind} (len={len(auth_hdr)})")
+            if self._session.auth:
+                _debug(f"    session.auth: Basic ({self._session.auth[0]}:****)")
+            for k, v in req_headers.items():
+                if k.lower() != "authorization":
+                    _debug(f"    header: {k}: {v}")
+
+        resp = self._session.request(
             method=method,
             url=url,
             params=params,
@@ -226,6 +252,20 @@ class EndevorConnection:
             headers=req_headers,
             timeout=timeout or self.timeout,
         )
+
+        if DEBUG_HTTP:
+            _debug(f"<<< {resp.status_code} {resp.reason} ({len(resp.content)} bytes)")
+            for k, v in resp.headers.items():
+                _debug(f"    {k}: {v}")
+            ct = resp.headers.get("content-type", "")
+            if "json" in ct:
+                body = resp.text[:2000]
+                _debug(f"    body: {body}")
+            elif "text" in ct or "octet-stream" in ct:
+                _debug(f"    body: ({len(resp.content)} bytes, first 200): {resp.text[:200]}")
+            _debug("")
+
+        return resp
 
     def request(
         self,
@@ -281,7 +321,9 @@ class EndevorConnection:
             if token:
                 self._jwt_token = token
                 self._session.headers["Authorization"] = f"Bearer {token}"
+                self._session.auth = None
                 self._authenticated = True
+                _debug("JWT obtained — switched to Bearer auth, cleared Basic auth")
                 return {"status": "authenticated", "token_received": True}
             return {"status": "response_ok", "data": data}
         elif resp.status_code == 401:
@@ -302,10 +344,14 @@ class EndevorConnection:
             "requests_sent": self._request_count,
             "uptime_seconds": round(time.time() - self._connect_time, 1) if self._connect_time and self._connected else 0,
         }
-        if self.username:
+        if self._jwt_token:
+            info["auth_method"] = "bearer_token"
+            if self.username:
+                info["username"] = self.username
+        elif self.username:
             info["auth_method"] = "basic"
             info["username"] = self.username
-        elif self.bearer_token or self._jwt_token:
+        elif self.bearer_token:
             info["auth_method"] = "bearer_token"
         if self.ssl_certfile:
             info["client_cert"] = os.path.basename(self.ssl_certfile)
