@@ -92,6 +92,16 @@ def _auto_connect():
 
     use_ssl = port == 443 or os.environ.get("ENDEVOR_USE_SSL", "true").strip().lower() not in ("false", "0", "no")
 
+    print(
+        f"[Endevor-MCP] Auto-connect config:\n"
+        f"  host={host} port={port} datasource={datasource}\n"
+        f"  username={'(set)' if username else '(NOT SET)'}\n"
+        f"  password={'(set, len=' + str(len(password)) + ')' if password else '(NOT SET)'}\n"
+        f"  bearer_token={'(set)' if bearer_token else '(not set)'}\n"
+        f"  use_ssl={use_ssl} ssl_no_verify={ssl_no_verify}",
+        file=sys.stderr,
+    )
+
     try:
         conn_id, conn = conn_mgr.create(
             host=host, port=port, datasource=datasource, name="auto",
@@ -110,6 +120,10 @@ def _auto_connect():
 
         if username and password and datasource:
             auth_result = conn.authenticate()
+            print(
+                f"[Endevor-MCP] authenticate() returned: {auth_result}",
+                file=sys.stderr,
+            )
             if auth_result.get("status") == "authenticated":
                 print(
                     "[Endevor-MCP] JWT token obtained — Bearer auth active",
@@ -121,8 +135,18 @@ def _auto_connect():
                     f"— falling back to Basic Auth",
                     file=sys.stderr,
                 )
+        else:
+            print(
+                f"[Endevor-MCP] Skipping JWT auth: "
+                f"username={'yes' if username else 'NO'} "
+                f"password={'yes' if password else 'NO'} "
+                f"datasource={'yes' if datasource else 'NO'}",
+                file=sys.stderr,
+            )
     except Exception as e:
+        import traceback
         print(f"[Endevor-MCP] Auto-connect failed: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
 
 
 # =====================================================================
@@ -312,7 +336,18 @@ def endevor_connect(
             lines.append(f"  Connectivity  : {result['connectivity']}")
         if result.get("datasources_found"):
             lines.append(f"  Datasources   : {result['datasources_found']} found")
+        if not result.get("authenticated"):
+            lines.append(
+                "\n  WARNING: No credentials provided. You must call "
+                "endevor_authenticate with username and password before "
+                "any authenticated operations will work."
+            )
         lines.append(f"\nUse connection ID '{conn_id}' for subsequent operations.")
+        if result.get("authenticated") and result.get("auth_method") == "basic":
+            lines.append(
+                f"Call endevor_authenticate(conn_id='{conn_id}') to obtain "
+                f"a JWT token for Bearer auth."
+            )
         return "\n".join(lines)
     except Exception as e:
         conn_mgr.remove(conn_id)
