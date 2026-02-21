@@ -557,10 +557,7 @@ def endevor_list_environments(
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
-    if environment and environment != "*":
-        resp = conn.get(f"/env/{environment}", params=params)
-    else:
-        resp = conn.get("/env", params=params)
+    resp = conn.get(f"/env/{environment}", params=params)
     return _parse_response(resp, "Environments")
 
 
@@ -585,10 +582,7 @@ def endevor_list_stages(
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
-    base = f"/env/{environment}/stgnum"
-    if stage and stage != "*":
-        base += f"/{stage}"
-    resp = conn.get(base, params=params)
+    resp = conn.get(f"/env/{environment}/stgnum/{stage}", params=params)
     return _parse_response(resp, "Stages")
 
 
@@ -615,10 +609,7 @@ def endevor_list_systems(
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
-    base = f"/env/{environment}/stgnum/{stage}/sys"
-    if system and system != "*":
-        base += f"/{system}"
-    resp = conn.get(base, params=params)
+    resp = conn.get(f"/env/{environment}/stgnum/{stage}/sys/{system}", params=params)
     return _parse_response(resp, "Systems")
 
 
@@ -647,10 +638,7 @@ def endevor_list_subsystems(
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
-    base = f"/env/{environment}/stgnum/{stage}/sys/{system}/subsys"
-    if subsystem and subsystem != "*":
-        base += f"/{subsystem}"
-    resp = conn.get(base, params=params)
+    resp = conn.get(f"/env/{environment}/stgnum/{stage}/sys/{system}/subsys/{subsystem}", params=params)
     return _parse_response(resp, "Subsystems")
 
 
@@ -679,10 +667,7 @@ def endevor_list_types(
     """
     conn = _get_conn(conn_id)
     params = _build_query_params(path=path, search=search, **{"return": return_opt})
-    base = f"/env/{environment}/stgnum/{stage}/sys/{system}/type"
-    if type_name and type_name != "*":
-        base += f"/{type_name}"
-    resp = conn.get(base, params=params)
+    resp = conn.get(f"/env/{environment}/stgnum/{stage}/sys/{system}/type/{type_name}", params=params)
     return _parse_response(resp, "Types")
 
 
@@ -737,10 +722,11 @@ def endevor_list_elements(
     )
     if limit > 0:
         params["limit"] = limit
-    base = f"/env/{environment}/stgnum/{stage}/sys/{system}/subsys/{subsystem}/type/{type_name}/ele"
-    if element and element != "*":
-        base += f"/{element}"
-    resp = conn.get(base, params=params)
+    resp = conn.get(
+        f"/env/{environment}/stgnum/{stage}/sys/{system}/subsys/{subsystem}"
+        f"/type/{type_name}/ele/{element}",
+        params=params,
+    )
     return _parse_response(resp, "Elements")
 
 
@@ -766,10 +752,10 @@ def endevor_list_members(
         member: Member name filter (wildcard supported)
     """
     conn = _get_conn(conn_id)
-    base = f"/env/{environment}/stgnum/{stage}/sys/{system}/subsys/{subsystem}/type/{type_name}/mem"
-    if member and member != "*":
-        base += f"/{member}"
-    resp = conn.get(base)
+    resp = conn.get(
+        f"/env/{environment}/stgnum/{stage}/sys/{system}/subsys/{subsystem}"
+        f"/type/{type_name}/mem/{member}",
+    )
     return _parse_response(resp, "Members")
 
 
