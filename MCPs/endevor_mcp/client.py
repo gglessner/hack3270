@@ -300,10 +300,35 @@ class EndevorConnection:
         return self.request("DELETE", path, **kwargs)
 
     def authenticate(self) -> Dict[str, Any]:
-        """Get a JWT token from the Endevor /auth endpoint."""
+        """Get a JWT token from the Endevor /auth endpoint.
+
+        The /auth endpoint requires Basic Auth credentials to issue a JWT.
+        After obtaining the token, session.auth is cleared so subsequent
+        requests use only the Bearer token.  Re-authentication is safe
+        because this method always sends Basic Auth explicitly.
+        """
         if not self.datasource:
             return {"error": "datasource is required for authentication"}
-        resp = self._do_request("GET", f"/{self.datasource}/auth")
+        if not self.username or not self.password:
+            return {"error": "username/password required for JWT authentication"}
+
+        # Temporarily restore Basic Auth for the /auth call, since
+        # session.auth may have been cleared after a previous JWT.
+        saved_auth = self._session.auth
+        self._session.auth = (self.username, self.password)
+        # Remove any stale Bearer header so Basic Auth is used
+        saved_hdr = self._session.headers.pop("Authorization", None)
+
+        _debug(f"Authenticating with Basic Auth as {self.username}")
+
+        try:
+            resp = self._do_request("GET", f"/{self.datasource}/auth")
+        finally:
+            # Always restore previous state if the request fails
+            self._session.auth = saved_auth
+            if saved_hdr:
+                self._session.headers["Authorization"] = saved_hdr
+
         if resp.status_code == 200:
             data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             token = None
