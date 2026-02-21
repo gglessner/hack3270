@@ -224,6 +224,16 @@ class EndevorConnection:
         if accept:
             req_headers["Accept"] = accept
 
+        # Enforce auth on every request via per-request headers so it
+        # survives regardless of session state, redirects, etc.
+        if "Authorization" not in req_headers:
+            if self._jwt_token:
+                req_headers["Authorization"] = f"Bearer {self._jwt_token}"
+            elif self._session.auth:
+                pass  # requests will apply session.auth automatically
+            elif self.bearer_token:
+                req_headers["Authorization"] = f"Bearer {self.bearer_token}"
+
         self._request_count += 1
 
         if DEBUG_HTTP:
@@ -232,12 +242,14 @@ class EndevorConnection:
                 _debug(f"    params: {params}")
             if json_body:
                 _debug(f"    body: {json_body}")
-            auth_hdr = req_headers.get("Authorization") or self._session.headers.get("Authorization")
+            auth_hdr = req_headers.get("Authorization")
             if auth_hdr:
                 kind = auth_hdr.split()[0] if " " in auth_hdr else auth_hdr
                 _debug(f"    auth header: {kind} (len={len(auth_hdr)})")
             if self._session.auth:
                 _debug(f"    session.auth: Basic ({self._session.auth[0]}:****)")
+            if not auth_hdr and not self._session.auth:
+                _debug("    WARNING: no auth on this request!")
             for k, v in req_headers.items():
                 if k.lower() != "authorization":
                     _debug(f"    header: {k}: {v}")
@@ -303,31 +315,26 @@ class EndevorConnection:
         """Get a JWT token from the Endevor /auth endpoint.
 
         The /auth endpoint requires Basic Auth credentials to issue a JWT.
-        After obtaining the token, session.auth is cleared so subsequent
-        requests use only the Bearer token.  Re-authentication is safe
-        because this method always sends Basic Auth explicitly.
+        This method builds a Basic Auth header explicitly for the /auth
+        call, then stores the JWT in self._jwt_token.  All subsequent
+        requests pick up the token in _do_request() automatically.
         """
         if not self.datasource:
             return {"error": "datasource is required for authentication"}
         if not self.username or not self.password:
             return {"error": "username/password required for JWT authentication"}
 
-        # Temporarily restore Basic Auth for the /auth call, since
-        # session.auth may have been cleared after a previous JWT.
-        saved_auth = self._session.auth
-        self._session.auth = (self.username, self.password)
-        # Remove any stale Bearer header so Basic Auth is used
-        saved_hdr = self._session.headers.pop("Authorization", None)
+        import base64 as _b64
+        basic_cred = _b64.b64encode(
+            f"{self.username}:{self.password}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {basic_cred}"}
 
         _debug(f"Authenticating with Basic Auth as {self.username}")
 
-        try:
-            resp = self._do_request("GET", f"/{self.datasource}/auth")
-        finally:
-            # Always restore previous state if the request fails
-            self._session.auth = saved_auth
-            if saved_hdr:
-                self._session.headers["Authorization"] = saved_hdr
+        resp = self._do_request(
+            "GET", f"/{self.datasource}/auth", headers=auth_headers,
+        )
 
         if resp.status_code == 200:
             data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
@@ -345,10 +352,9 @@ class EndevorConnection:
                                 break
             if token:
                 self._jwt_token = token
-                self._session.headers["Authorization"] = f"Bearer {token}"
                 self._session.auth = None
                 self._authenticated = True
-                _debug("JWT obtained — switched to Bearer auth, cleared Basic auth")
+                _debug(f"JWT obtained (len={len(token)}), Bearer auth active")
                 return {"status": "authenticated", "token_received": True}
             return {"status": "response_ok", "data": data}
         elif resp.status_code == 401:
