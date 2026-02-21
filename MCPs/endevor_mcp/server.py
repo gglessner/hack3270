@@ -342,13 +342,20 @@ def endevor_connections() -> str:
         return "No active connections. Use endevor_connect to establish one."
     lines = ["Active Endevor Connections:\n"]
     for c in conns:
-        auth = "auth" if c["authenticated"] else "no-auth"
+        if c["authenticated"]:
+            method = c.get("auth_method", "unknown")
+            auth = f"authenticated via {method}"
+        else:
+            auth = "NOT authenticated"
         lines.append(
-            f"  {c['conn_id']}: {c['base_url']} "
-            f"[{c['protocol']}] ({auth}) "
-            f"ds={c.get('datasource', '')} "
-            f"| {c['requests_sent']} requests | {c['uptime_seconds']}s uptime"
+            f"  {c['conn_id']}: {c['base_url']} [{c['protocol']}]\n"
+            f"    Status       : {auth}\n"
+            f"    Datasource   : {c.get('datasource', '(none)')}\n"
+            f"    Requests sent: {c['requests_sent']}\n"
+            f"    Uptime       : {c['uptime_seconds']}s"
         )
+        if c.get("username"):
+            lines.append(f"    Username     : {c['username']}")
     return "\n".join(lines)
 
 
@@ -370,7 +377,12 @@ def endevor_authenticate(conn_id: str) -> str:
     conn = _get_conn(conn_id)
     result = conn.authenticate()
     if result.get("status") == "authenticated":
-        return "Authentication successful. JWT token obtained and applied to session."
+        return (
+            "Authentication successful.\n"
+            "  Method : Bearer Token (JWT)\n"
+            "  Status : AUTHENTICATED — token is applied to all subsequent requests\n"
+            f"  Conn ID: {conn_id}"
+        )
     elif result.get("status") == "unauthorized":
         return "Authentication failed: Invalid credentials (HTTP 401)."
     else:
