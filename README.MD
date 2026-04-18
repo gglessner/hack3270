@@ -4,6 +4,16 @@ A Python 3 toolkit for manipulating TN3270 data streams, specifically designed f
 
 **Current Version: 2.8.1** -- See [CHANGELOG.md](CHANGELOG.md) for version history.
 
+> **NEW: This repository now contains three packages.**
+>
+> | Package | Protocol | What |
+> |---|---|---|
+> | **hack3270** (this README) | tn3270 | The original. CICS / z/OS. Now with 5 new attacks: LU-name spoofing, Query Reply lying, IND$FILE intercept, ESM passive fingerprinting, pseudo-conversational state fuzzing. |
+> | **[hack5250](hack5250/README.md)** | tn5250 | **First publicly-available 5250 MITM tool.** IBM i / AS/400. FFW manipulation, IBMRSEED downgrade, DEVNAME spoofing, ATTN escape, protected-field tampering. Live-validated: hidden admin function discovery + database-persisted price corruption. |
+> | **[hackterm-core](hackterm-core/README.md)** | — | Shared infrastructure. `Protocol` ABC, headless `ProxyDaemon`, `EbcdicCodec`, `Storage`, `MaskInjector`. Both tools depend on it. |
+>
+> See [`docs/NEW_ATTACKS.md`](docs/NEW_ATTACKS.md) for the quick reference covering both protocols.
+
 ## Features
 
 - **Man-in-the-Middle Proxy** - Intercepts and logs all TN3270 traffic between your terminal emulator and the mainframe

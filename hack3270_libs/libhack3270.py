@@ -24,6 +24,15 @@ import datetime
 
 from pathlib import Path
 
+from hackterm_core import EbcdicCodec, Storage, ProxyDaemon, MutateOpts, MaskInjector
+from tn3270_legacy import TN3270Legacy
+# Phase 3: attack modules. Wired in __init__ after _daemon exists.
+from tn3270_v2 import TN3270
+from attacks.esm_passive import ESMFingerprinter
+from attacks.negotiation import LUSpoofer
+from attacks.structured import QueryReplyLiar, IndFileInterceptor
+from attacks.state_fuzz import StateFuzzer
+
 
 class Hack3270Error(Exception):
     """Base exception for hack3270 errors."""
@@ -39,28 +48,6 @@ class ProjectConfigError(Hack3270Error):
     """Raised when project configuration doesn't match existing database."""
     pass
 
-
-# EBCDIC to ASCII table
-e2a = [
-  '[0x00]', '[0x01]', '[0x02]', '[0x03]', '[0x04]', '[0x05]', '[0x06]', '[0x07]', '[0x08]', '[0x09]', '[0x0A]', '[0x0B]', '[0x0C]', '[0x0D]', '[0x0E]', '[0x0F]',
-  '[0x10]', '[0x11]', '[0x12]', '[0x13]', '[0x14]', '[0x15]', '[0x16]', '[0x17]', '[0x18]', '[0x19]', '[0x1A]', '[0x1B]', '[0x1C]', '[0x1D]', '[0x1E]', '[0x1F]',
-  '[0x20]', '[0x21]', '[0x22]', '[0x23]', '[0x24]', '[0x25]', '[0x26]', '[0x27]', '[0x28]', '[0x29]', '[0x2A]', '[0x2B]', '[0x2C]', '[0x2D]', '[0x2E]', '[0x2F]',
-  '[0x30]', '[0x31]', '[0x32]', '[0x33]', '[0x34]', '[0x35]', '[0x36]', '[0x37]', '[0x38]', '[0x39]', '[0x3A]', '[0x3B]', '[0x3C]', '[0x3D]', '[0x3E]', '[0x3F]',
-  ' ', '[0x41]', '[0x42]', '[0x43]', '[0x44]', '[0x45]', '[0x46]', '[0x47]', '[0x48]', '[0x49]', '¢', '.', '<', '(', '+', '|',
-  '&', '[0x51]', '[0x52]', '[0x53]', '[0x54]', '[0x55]', '[0x56]', '[0x57]', '[0x58]', '[0x59]', '!', '$', '*', ')', ';', '≠',
-  '-', '/', '[0x62]', '[0x63]', '[0x64]', '[0x65]', '[0x66]', '[0x67]', '[0x68]', '[0x69]', '|', ',', '%', '_', '>', '?',
-  '[0x70]', '[0x71]', '[0x72]', '[0x73]', '[074]', '[0x75]', '[0x76]', '[0x77]', '[0x78]', '`', ':', '#', '@', '\'', '=', '"',
-  '[0x80]', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', '[0x8A]', '[0x8B]', '[0x8C]', '[0x8D]', '[0x8E]', '[0x8F]',
-  '[0x90]', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', '[0x9A]', '[0x9B]', '[0x9C]', '[0x9D]', '[0x9E]', '[0x9F]',
-  '[0xA0]', '~', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '[0xAA]', '[0xAB]', '[0xAC]', '[0xAD]', '[0xAE]', '[0xAF]',
-  '[0xB0]', '[0xB1]', '[0xB2]', '[0xB3]', '[0xB4]', '[0xB5]', '[0xB6]', '[0xB7]', '[0xB8]', '[0xB9]', '[0xBA]', '[0xBB]', '[0xBC]', '[0xBD]', '[0xBE]', '[0xBF]',
-  '{', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', '[0xCA]', '[0xCB]', '[0xCC]', '[0xCD]', '[0xCE]', '[0xCF]',
-  '}', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', '[0xDA]', '[0xDB]', '[0xDC]', '[0xDD]', '[0xDE]', '[0xDF]',
-  '\\', '[0xE1]', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[0xEA]', '[0xEB]', '[0xEC]', '[0xED]', '[0xEE]', '[0xEF]',
-  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '[0xFA]', '[0xFB]', '[0xFC]', '[0xFD]', '[0xFE]', '[0xFF]' ]
-
-# Reverse lookup: ASCII to EBCDIC (for O(1) lookup instead of O(256))
-a2e = {char: idx for idx, char in enumerate(e2a)}
 
 # Pre-compiled regex patterns for parse_telnet
 TELNET_PATTERNS = [
@@ -262,8 +249,62 @@ class hack3270:
             self.logger.addHandler(ch)
         
         self.logger.debug("Hack3270 Initializing")
-        # Initialize the database 
+
+        # Phase 1: hackterm-core delegation. get_ascii/get_ebcdic route
+        # through this codec (cp037). The legacy module-level e2a/a2e
+        # tables were deleted in Task 6.
+        self._codec = EbcdicCodec("cp037")
+
+        # Phase 1 Task 5: MaskInjector. capture_mask delegates to this.
+        # Recreated by set_inject_mask when the mask char changes.
+        self._injector = MaskInjector(self._codec, mask_char="*")
+
+        # Initialize the database
         self.db_init()
+
+        # Phase 1 Task 4: protocol + proxy daemon. Created AFTER db_init
+        # because (a) self._storage is created there, (b) db_init may
+        # overwrite proxy_port/server_ip/server_port/tls_enabled from
+        # the project file's stored config.
+        self._protocol = TN3270Legacy()
+        self._daemon = ProxyDaemon(
+            protocol=self._protocol,
+            storage=self._storage,
+            listen_addr=(self.proxy_ip, self.proxy_port),
+            target_addr=(self.server_ip or "", self.server_port or 0),
+            use_tls=bool(self.tls_enabled),
+        )
+        # Observer: stash last server bytes for hack_toggled resend
+        # and gui.py direct reads. Also drives refresh_aids() — legacy
+        # daemon() called it inline (L1322) after every server recv.
+        def _stash_server(data, direction):
+            if direction == "s2c":
+                self.server_data = data
+                self.refresh_aids(data)
+        self._daemon.add_observer(_stash_server)
+
+        # Phase 3: attack objects. Each .attach() registers an observer
+        # on _daemon, so MUST come after _daemon exists. _proto_v2 is
+        # the new clean parser — separate from TN3270Legacy because the
+        # legacy one carries shim baggage. indfile.protocol is set so
+        # its IDLE→ARMED screen-text scan can render EBCDIC.
+        self._proto_v2 = TN3270()
+        self.esm = ESMFingerprinter(self._proto_v2)
+        self.lu_spoofer = LUSpoofer(self._proto_v2)
+        self.qr_liar = QueryReplyLiar()
+        self.indfile = IndFileInterceptor(
+            capture_dir=str(Path(self.db_filename).with_suffix("")) + "_captures"
+        )
+        self.indfile.protocol = self._proto_v2
+        self.esm.attach(self._daemon)
+        self.lu_spoofer.attach(self._daemon)
+        self.qr_liar.attach(self._daemon)
+        self.indfile.attach(self._daemon)
+        # StateFuzzer needs a SQLite conn — use a separate db file to avoid
+        # polluting the main Logs table with Flows/Steps tables.
+        self._fuzz_db = sqlite3.connect(f"{self.project_name}_flows.db")
+        self.state_fuzzer = StateFuzzer(self._proto_v2, self._fuzz_db)
+        self.state_fuzzer.attach(self._daemon)
 
         self.logger.debug("Project Name: {}".format(self.project_name))
         self.logger.debug("Server: {}:{}".format(
@@ -281,25 +322,19 @@ class hack3270:
         self.logger.debug("Shutting Down server connection")
         if self.server:
             self.server.close()
+        self.logger.debug("Shutting Down fuzzer database")
+        self._fuzz_db.close()
         self.logger.debug("Shutting Down API listener")
         self.api_stop()
 
     def db_init(self):
-        '''
-        Either creates, or loads, a SQLite 3 database file based on the project 
-        name.
-        
-        Args: 
-            None
-        Returns: 
-            None but sql_con and sql_cur get populated as SQL objects
+        '''Phase 1 Task 3: delegates to hackterm_core.Storage.
 
-        TODO:
-            Add support for other database types
+        Re-adds legacy offline-mode + config-mismatch validation that
+        Storage intentionally omits (those are tool-specific policy,
+        not core protocol concerns). Storage handles the schema.
         '''
-        # SQLite3---
-
-        # If DB file doesn't exist and Server IP address isn't set, exit---
+        # Legacy validation L311-318: offline + no db + no IP → die
         if not Path(self.db_filename).is_file() and not self.server_ip:
             if self.offline_mode:
                 print(f"Error: Project file '{self.db_filename}' not found.")
@@ -311,206 +346,115 @@ class hack3270:
 
         self.logger.debug("Opening database file: {}".format(self.db_filename))
 
-        self.sql_con = sqlite3.connect(self.db_filename)
-        self.sql_con.set_trace_callback(self.logger.debug) # Use log for SQL debugging
-        self.sql_cur = self.sql_con.cursor()
+        # Probe for existing Config BEFORE Storage opens the file —
+        # Storage creates the table if missing, so we can't check after.
+        _has_config = False
+        if Path(self.db_filename).is_file():
+            _probe = sqlite3.connect(self.db_filename)
+            _has_config = _probe.execute(
+                "SELECT count(name) FROM sqlite_master "
+                "WHERE TYPE='table' AND NAME='Config'"
+            ).fetchone()[0] == 1
+            _probe.close()
 
-        self.sql_cur.execute("""
-                             SELECT count(name) 
-                             FROM sqlite_master 
-                             WHERE TYPE='table' 
-                                AND NAME='Config'
-                             """)
+        self._storage = Storage(
+            self.db_filename,
+            server_ip=self.server_ip or "",
+            server_port=self.server_port or 0,
+            proxy_port=self.proxy_port,
+            tls_enabled=self.tls_enabled,
+        )
 
-        # If table exists, load previous settings---
-        if self.sql_cur.fetchone()[0] == 1:
-            self.logger.debug("Found existing project config")
-            self.sql_cur.execute("SELECT * FROM Config")
-            record = self.sql_cur.fetchall()
-            for row in record:
-                self.logger.debug(row)
+        # Legacy attr aliases — gui.py and on_closing() read these directly.
+        # check_inject_3270e() / export_csv() also use sql_cur.
+        self.sql_con = self._storage.conn
+        self.sql_cur = self._storage.conn.cursor()
 
-                if self.server_ip != row[1] and self.offline_mode == 0:
-                    raise ProjectConfigError(
-                        f"IP address mismatch with existing project '{self.project_name}.db'.\n"
-                        f"  Command line: {self.server_ip}\n"
-                        f"  Project file: {row[1]}\n"
-                        f"Either use the correct IP or delete '{self.project_name}.db' to start fresh."
-                    )
-                self.server_ip = row[1]
+        # Legacy config-mismatch validation (was L341-357). Storage already
+        # loaded values from the existing Config row; compare against what
+        # the caller passed in. Skip when offline (legacy: offline_mode == 0).
+        if _has_config:
+            if self.server_ip != self._storage.server_ip and self.offline_mode == 0:
+                raise ProjectConfigError(
+                    f"IP address mismatch with existing project '{self.project_name}.db'.\n"
+                    f"  Command line: {self.server_ip}\n"
+                    f"  Project file: {self._storage.server_ip}\n"
+                    f"Either use the correct IP or delete '{self.project_name}.db' to start fresh."
+                )
+            if self.server_port != self._storage.server_port and self.offline_mode == 0:
+                raise ProjectConfigError(
+                    f"Server port mismatch with existing project '{self.project_name}.db'.\n"
+                    f"  Command line: {self.server_port}\n"
+                    f"  Project file: {self._storage.server_port}\n"
+                    f"Either use the correct port or delete '{self.project_name}.db' to start fresh."
+                )
 
-                self.logger.debug('{} {}'.format(type(self.server_port),type(row[2])))
-                if self.server_port != int(row[2])  and self.offline_mode == 0:
-                    raise ProjectConfigError(
-                        f"Server port mismatch with existing project '{self.project_name}.db'.\n"
-                        f"  Command line: {self.server_port}\n"
-                        f"  Project file: {row[2]}\n"
-                        f"Either use the correct port or delete '{self.project_name}.db' to start fresh."
-                    )
-                if self.proxy_port != int(row[2]):
-                    self.logger.warn("Proxy port from project ({}) "
-                                  "overiding proxy port argument ({}) ".format(
-                                            row[2], self.proxy_port
-                                     ))
-                    
-                self.server_port = int(row[2])
-                self.proxy_port = int(row[3])
-                self.tls_enabled = int(row[4])
-        # else create table with current configuration---
-        else:
-            self.logger.debug("Creating Config table...")
-            self.sql_cur.execute("""
-                    CREATE TABLE Config (
-                                 CREATION_TS TEXT NOT NULL, 
-                                 SERVER_IP TEXT NOT NULL, 
-                                 SERVER_PORT INT NOT NULL, 
-                                 PROXY_PORT INT NOT NULL, 
-                                 TLS_ENABLED INT NOT NULL
-                                 )
-                    """)
-            
-            insert = """
-                      INSERT INTO Config (
-                      'CREATION_TS', 
-                      'SERVER_IP', 
-                      'SERVER_PORT', 
-                      'PROXY_PORT', 
-                      'TLS_ENABLED'
-                      ) VALUES (
-                      '{time}',
-                      '{server_ip}',
-                      '{server_port}',
-                      '{proxy_port}',
-                      '{tls}' 
-                      )""".format(
-                        time= str(time.time()),
-                        server_ip = self.server_ip,
-                        server_port = str(self.server_port),
-                        proxy_port = str(self.proxy_port),
-                        tls = self.tls_enabled * 1 # Why times one? To convert it to an int
-                      )
-            
-            self.sql_cur.execute(insert)
-            self.sql_con.commit()
+        # Adopt config from db (legacy L348/364-366). Storage.tls_enabled
+        # is bool; legacy stored int — preserve legacy type.
+        self.server_ip = self._storage.server_ip
+        self.server_port = self._storage.server_port
+        self.proxy_port = self._storage.proxy_port
+        self.tls_enabled = int(self._storage.tls_enabled)
 
-        self.sql_cur.execute("""
-                             SELECT count(name) 
-                             FROM sqlite_master 
-                             WHERE TYPE='table' AND NAME='Logs'
-                             """)
-        if self.sql_cur.fetchone()[0] != 1:
-            self.logger.debug("Creating Logs table...")
-            self.sql_cur.execute("""
-                            CREATE TABLE Logs (
-                            ID INTEGER PRIMARY KEY AUTOINCREMENT, 
-                            TIMESTAMP TEXT, 
-                            C_S CHAR(1), 
-                            NOTES TEXT, 
-                            DATA_LEN INT, 
-                            RAW_DATA BLOB(4000))
-                            """) # 3,564
-            self.sql_con.commit()
-        
     def write_database_log(self, direction, notes, data):
+        '''Phase 1 Task 3: delegates to Storage.log, EXCEPT for IAC traffic.
 
-        if data[0] == 255:
+        Storage.log auto-tags 0xFF data with "telnet negotiation" but
+        gui.py:1423 string-matches "tn3270 negotiation". For IAC packets
+        we bypass Storage.log and write directly with the legacy tag.
+        '''
+        if data and data[0] == 255:
             notes = notes + "tn3270 negotiation"
+            self.sql_cur.execute(
+                "INSERT INTO Logs (TIMESTAMP, C_S, NOTES, DATA_LEN, RAW_DATA) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (str(time.time()), direction, notes, len(data),
+                 sqlite3.Binary(data)),
+            )
+            self.sql_con.commit()
+            return
+        self._storage.log(direction, notes, data)
 
-        self.sql_cur.execute("INSERT INTO Logs ('TIMESTAMP', 'C_S', 'NOTES', 'DATA_LEN', 'RAW_DATA') VALUES (?, ?, ?, ?, ?)", (str(time.time()), direction, notes, str(len(data)), sqlite3.Binary(data)))
-
-#        self.sql_cur.execute("""
-#                             INSERT INTO Logs (
-#                                'TIMESTAMP', 
-#                                'C_S', 
-#                                'NOTES', 
-#                                'DATA_LEN', 
-#                                'RAW_DATA') 
-#                             VALUES (
-#                                '{ts}', '{dir}', '{note}', '{len}', {bytes})""".format(
-#                                ts=str(time.time()), 
-#                                dir=direction, 
-#                                note=notes, 
-#                                len=str(len(data)), 
-#                                bytes=sqlite3.Binary(data)))
-        self.sql_con.commit()
-        
-        return
-    
     def all_logs(self,start=0):
-        '''
-        Gets all logs from the database
+        return self._storage.all_logs(start)
 
-            Args:
-                start (int): the start record, default 0
-        '''
-        self.logger.debug("Start: {}".format(start))
-        if start > 0 :
-            self.logger.debug("Getting all records starting at {}".format(start))
-            self.sql_cur.execute("SELECT * FROM Logs WHERE ID > {} ORDER BY ID ASC".format(start))
-        else:
-            self.logger.debug("Getting all records from database")
-            self.sql_cur.execute("SELECT * FROM Logs ORDER BY ID ASC")
-
-        return self.sql_cur.fetchall()
-    
     def get_log(self, record_id):
-        self.logger.debug("Fetching record id: {}".format(record_id))
-        sql_text = "SELECT * FROM Logs WHERE ID=" + str(record_id)
-        self.sql_cur.execute(sql_text)
-        return self.sql_cur.fetchall()
+        '''Storage.get_log returns Optional[tuple]; legacy returned a
+        fetchall() list. gui.py iterates the result, so wrap it.'''
+        row = self._storage.get_log(record_id)
+        return [row] if row else []
 
     def check_inject_3270e(self):
-        '''
-        Checks the first record from the logs database and inspects it to
-        identify if this server is in tn3270 extended mode or not
+        '''Replaces SQLite-row-1 inspection with TN3270Legacy.is_tn3270e.
 
-            Returns:
-                True if the connection is in TN3270E mode
-                False if not in TN3270E mode
-        '''
+        Fallback: gui.py:3794 calls this BEFORE daemon() runs, so the
+        protocol may not have detected yet. If handshake isn't complete
+        but a previous session left row 1 in the db, use that.
 
-        sql_text = "SELECT * FROM Logs WHERE ID=1"
-        self.sql_cur.execute(sql_text)
-        records = self.sql_cur.fetchall()
-        for row in records:
-            # If the third character is 
-            if row[5][2] == 40:
-                self.logger.debug("TN3270E Detected.")
-                return True 
-            else:
-                self.logger.debug("TN3270 Detected.")
-                return False
+        Returns:
+            True if the connection is in TN3270E mode, False otherwise.
+        '''
+        if self._daemon.handshake_complete:
+            return self._protocol.is_tn3270e
+        # Fallback to legacy row-1 check for the pre-handshake window
+        row = self._storage.get_log(1)
+        if row and row[5] and len(row[5]) >= 3 and row[5][2] == 40:
+            self.logger.debug("TN3270E Detected (row-1 fallback).")
+            # Sync the cached state too so subsequent calls are fast
+            self._protocol._is_tn3270e = True
+            return True
+        return self._protocol.is_tn3270e
 
     def check_server(self,record_id):
-
-        sql_text = "SELECT * FROM Logs WHERE ID=" + str(record_id)
-        self.sql_cur.execute(sql_text)
-        records = self.sql_cur.fetchall()
-        for row in records:
-            if row[2] == "S":
-                return True
-            else:
-                return False
+        return self._storage.is_server_record(record_id)
 
     def check_record(self, record_id):
-
-        sql_text = "SELECT * FROM Logs WHERE ID=" + str(record_id)
-        self.sql_cur.execute(sql_text)
-        records = self.sql_cur.fetchall()
-        for row in records:
-            # If the first character is 0xFF then this is a telnet handshake message
-            if row[5][0] == 255:
-                return True
-            else:
-                return False
+        return self._storage.is_telnet_record(record_id)
 
     def play_record(self,record_id):
-        
-        sql_text = "SELECT * FROM Logs WHERE ID=" + str(record_id)
-        self.sql_cur.execute(sql_text)
-        records = self.sql_cur.fetchall()
-        for row in records:
-            self.client.send(row[5])
+        raw = self._storage.get_raw(record_id)
+        if raw and self.client:
+            self.client.send(raw)
 
     def export_csv(self,csv_filename=False):
         '''
@@ -770,58 +714,33 @@ class hack3270:
         self.hack_color_hv = value
 
     def set_inject_mask(self,mask="*"):
-        '''Sets the mask to be used for injection'''
+        '''Sets the mask char. Recreates MaskInjector since mask_char
+        is bound at construction (it caches _mask_byte).'''
         self.logger.debug("Setting mask to '{}'".format(mask))
         self.inject_mask = mask
+        self._injector = MaskInjector(self._codec, mask_char=mask)
 
     ## TCP/IP Functions
 
     def client_connect(self):
-        '''
-        Creates the proxy server on proxy_ip, proxy_port
-        '''
-        
+        '''Delegates to ProxyDaemon.wait_for_client.
+        Aliases socket back so tend_server/send_key keep working.'''
         self.logger.debug("Setting up proxy listener on {}:{}".format(
             self.proxy_ip, self.proxy_port
         ))
-
-        client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        client_sock.bind((self.proxy_ip, self.proxy_port))
-        client_sock.listen(4)
-
-        self.logger.debug("Waiting for connection on {}:{}".format(
-            self.proxy_ip, self.proxy_port
-        ))
-
-        (conn, (ip,port)) = client_sock.accept()
-
-        self.logger.debug("Proxy Connection from {}:{}".format(ip,port))
-
-        self.client = conn
+        self._daemon.wait_for_client()
+        self.client = self._daemon.client
 
     def server_connect(self):
-        '''
-        Connects to a TN3270 server on server_ip, server_port
-        '''
+        '''Delegates to ProxyDaemon.connect_to_server.'''
         if self.offline_mode:
             raise Hack3270Error("Cannot connect when in Offline Mode")
-        
-        self.logger.debug("Connecting to {}:{}".format(
-            self.server_ip,self.server_port))
-        
-        server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        if self.tls_enabled:
-            self.logger.debug(self.tls_enabled)
-            self.logger.debug("Connecting with TLS")
-            context = ssl._create_unverified_context()
-            self.server = context.wrap_socket(server_sock, server_hostname=self.server_ip)
-        else:
-            self.server = server_sock
+        self.logger.debug("Connecting to {}:{}".format(
+            self.server_ip, self.server_port))
 
         try:
-            self.server.connect((self.server_ip, self.server_port))
+            self._daemon.connect_to_server()
         except ConnectionRefusedError:
             raise ConnectionError(
                 f"Connection refused by {self.server_ip}:{self.server_port}.\n"
@@ -840,9 +759,10 @@ class hack3270:
             raise ConnectionError(
                 f"Network error connecting to {self.server_ip}:{self.server_port}: {e}"
             )
-        
+
+        self.server = self._daemon.server
         self.logger.debug("Connected to {}:{}".format(
-            self.server_ip,self.server_port))
+            self.server_ip, self.server_port))
 
     def api_start(self):
         '''
@@ -1087,10 +1007,10 @@ class hack3270:
                 client_socket.send(f'{{"status": "error", "message": "Log ID {log_id} is not client data"}}\n'.encode('utf-8'))
                 return
             
-            # Convert ASCII mask char to EBCDIC
-            if mask_char in a2e:
-                ebcdic_mask = a2e[mask_char]
-            else:
+            # Convert ASCII mask char to EBCDIC byte value (int)
+            try:
+                ebcdic_mask = self._codec.to_ebcdic(mask_char)[0]
+            except (UnicodeEncodeError, IndexError):
                 client_socket.send(f'{{"status": "error", "message": "Cannot convert mask char to EBCDIC"}}\n'.encode('utf-8'))
                 return
             
@@ -1327,22 +1247,103 @@ class hack3270:
         return
 
     def daemon(self):
+        '''Drives ProxyDaemon.tick(). Replaces the 142-line monolith.
 
-        # Build the list of sockets to monitor
-        read_sockets = [self.client, self.server]
-        
-        # Add API listener if active
+        Steps each call:
+          1. Sync hack_* flags → daemon.mutate_opts (5-field subset)
+          2. Build client-intercept callback from current state
+          3. Pump API listener (still inline — Phase 2 moves to ApiServer)
+          4. tick()
+          5. Handle hack_toggled resend (not modeled by ProxyDaemon)
+        '''
+        # ── 1. Sync flags ──
+        # Map 14 legacy flags onto 5 MutateOpts. Lossy on purpose:
+        # the full-fidelity path is hack_toggled → manipulate() →
+        # _do_manipulate(self). The tick() path uses MutateOpts so
+        # future Phase 3 attacks see a clean interface.
+        opts = self._daemon.mutate_opts
+        opts.unprotect       = bool(self.hack_on and self.hack_prot)
+        opts.reveal_hidden   = bool(self.hack_on and self.hack_hf)
+        opts.remove_numeric  = bool(self.hack_on and self.hack_rnr)
+        opts.high_visibility = bool(self.hack_on and self.hack_hv)
+        opts.color_reveal    = bool(self.hack_color_on)
+
+        # ── 2. Client intercept ──
+        # Replaces inline branches at legacy L1291-1312.
+        intercept = None
+        if self.inject_setup_capture:
+            def intercept(data):
+                self.capture_mask(data)
+                return None  # drop, don't forward
+        elif (self.aid_spoof_enabled
+              and self.aid_spoof_mode == 'FUZZER'
+              and self.aid_fuzzer_armed
+              and not self.aid_fuzzer_running):
+            def intercept(data):
+                self.aid_fuzzer_captured_data = data
+                self.aid_fuzzer_armed = False
+                self.aid_fuzzer_running = True
+                self.aid_fuzzer_progress = 0
+                self.logger.debug("AID Fuzzer: Captured transmission, starting fuzz")
+                if self.aid_fuzzer_callback:
+                    self.aid_fuzzer_callback('captured', 0, 256, None)
+                return None  # drop — fuzzer loop sends
+        elif (self.aid_spoof_enabled
+              and self.aid_spoof_mode == 'MANUAL'):
+            def intercept(data):
+                if len(data) < 1:
+                    return data
+                modified, orig, spoofed = self.spoof_aid(data)
+                self.write_database_log(
+                    'C', f"AID Spoofed: {orig} -> {spoofed}", modified)
+                # Send directly + return None to preserve single-log
+                # semantics (returning modified would make ProxyDaemon
+                # log it again via storage.log).
+                self.server.send(modified)
+                return None
+        self._daemon.set_client_intercept(intercept)
+
+        # ── 3. API listener (kept inline for Phase 1) ──
+        # The legacy daemon() embedded API handling. ProxyDaemon doesn't
+        # know about it. Pump it separately. Phase 2 → hackterm_core.ApiServer.
         if self.api_listener:
-            read_sockets.append(self.api_listener)
-        
-        # Add all connected API clients
-        read_sockets.extend(self.api_clients)
+            self._pump_api()
 
-        # Tend to client sending data
-        rlist, w, e = select.select(read_sockets, [], [], 0)
-        
-        # Handle new API connections
-        if self.api_listener and self.api_listener in rlist:
+        # ── 4. Tick ──
+        self._daemon.tick()
+
+        # Re-alias in case daemon swapped sockets (it doesn't, but be safe)
+        self.client = self._daemon.client
+        self.server = self._daemon.server
+
+        # ── 5. hack_toggled resend (legacy L1324-1381) ──
+        if (self.hack_toggled or self.hack_color_toggled) and self.server_data:
+            log_line = ''
+            if self.hack_toggled:
+                if self.hack_on:
+                    log_line = self.hack_on_logline()
+                else:
+                    log_line = 'Hack Fields Attributes: TOGGLED OFF '
+                self.hack_toggled = 0
+            if self.hack_color_toggled:
+                if self.hack_color_on:
+                    log_line = log_line + self.hack_color_on_logline()
+                else:
+                    log_line = log_line + 'Hack Text Color: TOGGLED OFF '
+                self.hack_color_toggled = 0
+            hacked = self.manipulate(self.server_data)
+            self._daemon.inject_to_client(hacked)
+            self.write_database_log('S', log_line, hacked)
+
+    def _pump_api(self):
+        '''Legacy API listener pump — extracted from daemon() L1255-1282.
+        Phase 2 replaces with hackterm_core.ApiServer.'''
+        readable = [self.api_listener] + self.api_clients
+        try:
+            rlist, _, _ = select.select(readable, [], [], 0)
+        except (ValueError, OSError):
+            return
+        if self.api_listener in rlist:
             try:
                 api_client, addr = self.api_listener.accept()
                 api_client.setblocking(False)
@@ -1350,16 +1351,13 @@ class hack3270:
                 self.logger.debug(f"API client connected from {addr}")
             except Exception as e:
                 self.logger.error(f"Error accepting API connection: {e}")
-        
-        # Handle API client data
-        for api_client in self.api_clients[:]:  # Use slice copy to allow removal during iteration
+        for api_client in self.api_clients[:]:
             if api_client in rlist:
                 try:
                     data = api_client.recv(BUFFER_MAX)
                     if len(data) > 0:
                         self.handle_api_request(api_client, data)
                     else:
-                        # Client disconnected
                         self.logger.debug("API client disconnected")
                         self.api_clients.remove(api_client)
                         api_client.close()
@@ -1370,105 +1368,6 @@ class hack3270:
                         api_client.close()
                     except:
                         pass
-
-        if self.client in rlist:
-
-            self.logger.debug("Client Data Detected")
-            client_data = self.client.recv(BUFFER_MAX)
-            if len(client_data) > 0:
-                self.logger.debug("Client: {}".format(bytes(client_data)))
-                self.logger.debug("Client: {}".format(self.get_ascii(client_data)))
-                if self.inject_setup_capture:
-                    self.capture_mask(client_data)
-                # AID Fuzzer capture mode
-                elif self.aid_spoof_enabled and self.aid_spoof_mode == 'FUZZER' and self.aid_fuzzer_armed and not self.aid_fuzzer_running:
-                    # Capture this transmission for fuzzing
-                    self.aid_fuzzer_captured_data = client_data
-                    self.aid_fuzzer_armed = False
-                    self.aid_fuzzer_running = True
-                    self.aid_fuzzer_progress = 0
-                    self.logger.debug("AID Fuzzer: Captured transmission, starting fuzz")
-                    if self.aid_fuzzer_callback:
-                        self.aid_fuzzer_callback('captured', 0, 256, None)
-                    # Don't send yet - fuzzer loop will handle it
-                # AID Manual spoof mode
-                elif self.aid_spoof_enabled and self.aid_spoof_mode == 'MANUAL' and len(client_data) >= 1:
-                    modified_data, orig_aid, spoof_aid = self.spoof_aid(client_data)
-                    log_msg = f"AID Spoofed: {orig_aid} -> {spoof_aid}"
-                    self.write_database_log('C', log_msg, modified_data)
-                    self.server.send(modified_data)
-                else:
-                    self.write_database_log('C', '', client_data)
-                    self.server.send(client_data)
-
-        # Tend to server sending data
-        if self.server in rlist:
-            self.logger.debug("Server Data Detected")
-            self.server_data = self.server.recv(BUFFER_MAX)
-            if len(self.server_data) > 0:
-                self.logger.debug("Server: {}".format(bytes(self.server_data)))
-                self.logger.debug("Server: {}".format(self.get_ascii(self.server_data)))
-                self.handle_server(self.server_data)
-                self.refresh_aids(self.server_data)
-
-        if self.hack_toggled or self.hack_color_toggled: # Resend data to client if either of these options are toggled.
-
-            if self.hack_toggled:
-                self.logger.debug("Hack Toggled, resending data to client")
-            if self.hack_color_toggled:
-                self.logger.debug("Hack Color Toggled, resending data to client")
-            
-            if len(self.server_data) > 0:
-                log_line = ''
-
-                if self.hack_toggled:
-                    if self.hack_on:
-                        log_line = ('Hack Field Attributes: TOGGLED ON (' 
-                                    'Remove Field Prot: {pt}  - '
-                                    'Show Hidden: {hf} - ' 
-                                    'Remove NUM Prot: {rnr}) (' 
-                                    'SF: {sf} - ' 
-                                    'SFE: {sfe} - '
-                                    'MF: {mf}  - ' 
-                                    'EI: {ei} - ' 
-                                    'HV: {hv})').format(
-                                        pt=self.hack_prot,
-                                        hf=self.hack_hf,
-                                        rnr=self.hack_rnr,
-                                        sf=self.hack_sf,
-                                        sfe=self.hack_sfe,
-                                        mf=self.hack_mf,
-                                        ei=self.hack_ei,
-                                        hv=self.hack_hv
-                                        )
-                    else:
-                        log_line = 'Hack Fields Attributes: TOGGLED OFF '
-
-                    self.hack_toggled = 0
-
-                if self.hack_color_toggled:
-
-                    if self.hack_color_on:
-                        log_line = log_line + (
-                            'Hack Text Color: TOGGLED ON (' 
-                            'SFE: {sfe} - '
-                            'MF: {mf} - '
-                            'SF: {sf} - '
-                            'HV: {hv})'
-                            ).format(
-                                sfe=self.hack_color_sfe,
-                                mf=self.hack_color_mf,
-                                sf=self.hack_color_sa,
-                                hv=self.hack_color_hv
-                                )
-                    else:
-                        log_line = 'Hack Text Color: TOGGLED OFF '
-
-                    self.hack_color_toggled = 0
-
-                hacked_server = self.manipulate(self.server_data)
-                self.client.send(hacked_server)
-                self.write_database_log('S', log_line, hacked_server)
 
     def recv(self):
         self.client.recv(BUFFER_MAX)
@@ -1706,44 +1605,29 @@ class hack3270:
         return False
 
     def capture_mask(self, client_data):
-
-        preamble_count = 0
-        mask_count = 0
-        
+        '''Delegates to MaskInjector.capture, copies results back to
+        legacy attributes (inject_preamble/postamble/mask_len/config_set)
+        that gui.py:3334 reads via get_inject_*.'''
         self.logger.debug("Capturing Mask location with mask {}".format(
                         self.inject_mask))
-        
-        for x in range(0, len(client_data) - 1):
-            character = self.get_ascii(client_data[x].to_bytes(1, 'little'))
-            if character != self.inject_mask:
-                preamble_count += 1
-            else:
-                break
 
-        for x in range(preamble_count, len(client_data)):
-            character = self.get_ascii(client_data[x].to_bytes(1, 'little'))
-            if character == self.inject_mask:
-                mask_count += 1
-            else:
-                break
+        found = self._injector.capture(client_data)
 
-        if mask_count > 0:
-            self.logger.debug(("Mask found (length: {})"
-            " - Input field identified - Ready for injection.").format(
-                                                                mask_count))
-            self.inject_mask_len = mask_count
-            self.inject_preamble = client_data[:preamble_count]
-            self.inject_postamble = client_data[preamble_count + mask_count:]
+        if found:
+            self.inject_mask_len = self._injector.mask_len
+            self.inject_preamble = self._injector.preamble
+            self.inject_postamble = self._injector.postamble
             self.inject_config_set = 1
-            log = 'Inject setup - Mask: {} - Length: {}'.format(self.inject_mask,mask_count)
-            self.logger.debug(log)
-            self.write_database_log('C', log, client_data)
+            log = 'Inject setup - Mask: {} - Length: {}'.format(
+                self.inject_mask, self._injector.mask_len)
         else:
             self.inject_mask_len = 0
             self.inject_config_set = 0
-            log = 'Inject setup - Mask: {} - Mask not found!'.format(self.inject_mask)
-            self.logger.debug(log)
-            self.write_database_log('C', log, client_data)
+            log = 'Inject setup - Mask: {} - Mask not found!'.format(
+                self.inject_mask)
+
+        self.logger.debug(log)
+        self.write_database_log('C', log, client_data)
         self.inject_setup_capture = False
 
     def hack_on_logline(self):
@@ -1780,16 +1664,22 @@ class hack3270:
                         )
 
     def get_ascii(self, ebcdic_string):
-        ''' Converts EBCDIC to ASCII, returns ASCII string'''
-        return ''.join(e2a[byte] for byte in ebcdic_string)
+        ''' Converts EBCDIC to ASCII — delegates to EbcdicCodec.
+
+        Phase 1 Task 2: replaced hand-rolled e2a lookup with cp037 codec.
+        See tests/test_shim_ebcdic.py::ACCEPTED_DIVERGENCES for the 7 bytes
+        whose display string changed (all cosmetic; no TELNET_PATTERNS impact).
+        '''
+        return self._codec.to_ascii(ebcdic_string)
 
     def get_ebcdic(self, string):
-        ''' Converts ASCII to EBCDIC, returns EBCDIC bytes'''
-        result = bytearray()
-        for char in string:
-            if char in a2e:
-                result.append(a2e[char])
-        return bytes(result)
+        ''' Converts ASCII to EBCDIC — delegates to EbcdicCodec.
+
+        BEHAVIOR CHANGE vs legacy: chars not in cp037 now raise
+        UnicodeEncodeError instead of being silently dropped. Legacy
+        silently dropping was a bug — it produced short/malformed packets.
+        '''
+        return self._codec.to_ebcdic(string)
         
     def refresh_aids(self, server_data):
         '''
@@ -1813,41 +1703,6 @@ class hack3270:
         #))
         return self.found_aids
 
-    def flip_bits(self, tn3270_data):
-        '''
-        Flips the Protected, Non-display, and numeric bits in the TN3270
-        based on the values in hack_prot, hack_hf, hack_rnr.
-
-        Args:
-            tn3270_data (byte): tn3270 byte
-
-        Returns: byte with bit changes
-        '''
-        value = tn3270_data
-        self.logger.debug("Flipping bits in {:02X}".format(tn3270_data))
-        # Turn of 'Protected' Flag (Bit 6) if Set
-        if self.hack_prot:
-            self.logger.debug("Flipping Protected bit")
-            if value & 0b00100000 == 0b00100000:
-                value ^= 0b00100000
-        # Turn off 'Non-display' Flag (Bit 4) if Set (i.e. Bits 3 and 4 are on)
-        if self.hack_hf:
-            self.logger.debug("Flipping Non-display bit")
-            if value & 0b00001100 == 0b00001100:
-        # Flip bit 3 instead of 4 if enable intentisty is selected
-                if self.hack_ei:
-                    self.logger.debug("Flipping intensity bit")
-                    value ^= 0b00000100
-                else:
-                    value ^= 0b00001000
-        # Turn off 'Numeric Only' Flag (Bit 5) if Set
-        if self.hack_rnr:
-            self.logger.debug("Flipping Numeric bit")
-            if value & 0b00010000 == 0b00010000:
-                value ^= 0b00010000
-        self.logger.debug("Flipped bits: {:02X}".format(tn3270_data))
-        return(value)
-
     def check_hidden(self, tn3270_data):
         '''
         Checks for the existence of the hidden bit
@@ -1867,133 +1722,12 @@ class hack3270:
             return False
 
     def manipulate(self, tn3270_data):
-
+        '''Delegates to TN3270Legacy._do_manipulate, passing self as
+        the flags object. Full-fidelity 14-flag path — _do_manipulate
+        duck-types `flags` so it works identically whether passed a
+        SimpleNamespace (mutate() path) or this hack3270 instance.'''
         self.current_state_debug_msg()
-        found_hidden_data = 0
-        # Don't manipulate data if telnet
-        if tn3270_data[0] == 255:
-            self.logger.debug("Received Telnet data, returning")
-            return(tn3270_data)
-
-        data = bytearray(len(tn3270_data))
-        data[:] = tn3270_data
-
-        self.logger.debug("Data recieved: {}".format(data.hex()))
-        self.logger.debug("Hack on: {}".format(self.hack_on))
-        # Process hacking of Basic Field Attributes
-        if self.hack_on:
-            for x in range(len(data)):
-                #self.logger.debug("Current Byte: {}".format(data[x]))
-
-                if self.hack_sf and data[x] == 0x1d: # Start Field
-                    self.logger.debug("Start Field found")
-
-                    data[x + 1] = self.flip_bits(data[x + 1])
-                    if self.hack_hf and self.check_hidden(data[x + 1]):
-                        #self.logger.debug("Disabling found Hidden Field")
-                        bfa_byte = data[x + 1].to_bytes(1, byteorder='little')
-                        if self.hack_hv:
-                            self.logger.debug("Enabling High Visibility")
-                            data2 = bytearray(len(data) + 6)
-                            data2 = data[:x] + b'\x29\x03\xc0' + bfa_byte + b'\x41\xf2\x42\xf6' + data[x + 2:]
-                            data = data2
-                            x = x + 6
-                        else:
-                            data2 = bytearray(len(data) + 4)
-                            data2 = data[:x + 2] + b'\x28\x42\xf6' + data[x + 2:]
-                            data2 = data[:x] + b'\x29\x02\xc0' + bfa_byte + b'\x42\xf6' + data[x + 2:]
-                            x = x + 4
-
-                elif data[x] == 0x29: # Start Field Extended
-                    self.logger.debug("Start Field Extended found, looping over {} fields".format(data[x + 1]))
-
-                    for y in range(data[x + 1]):
-                        
-                        if(len(data) < ((x + 3) + (y * 2))):
-                            continue
-                        if self.hack_sfe and data[((x + 3) + (y * 2)) - 1] == 0xc0: # Basic 3270 field attributes
-                            if self.check_hidden(data[((x + 3) + (y * 2))]) and self.hack_hv:
-                                found_hidden_data = 1
-                            data[((x + 3) + (y * 2))] = self.flip_bits(data[((x + 3) + (y * 2))])
-                    if self.hack_sfe and found_hidden_data:
-                        data[x + 1] = data[x + 1] + 2
-                        data2 = bytearray(len(data) + 4)
-                        data2 = data[:x + (data[x + 1] * 2) - 2] + b'\x41\xf2\x42\xf6' + data[x + (data[x + 1] * 2) - 2:]
-                        data = data2
-                        x = x + 4
-                        found_hidden_data = 0
-                    continue
-                elif data[x] == 0x2c: # Modify Field
-                    for y in range(data[x + 1]):
-                        if(len(data) < ((x + 3) + (y * 2))):
-                            continue
-                        if self.hack_mf and data[((x + 3) + (y * 2)) - 1] == 0xc0: # Basic 3270 field attributes
-                            if self.check_hidden(data[((x + 3) + (y * 2))]) and self.hack_hv:
-                                found_hidden_data = 1
-                            data[((x + 3) + (y * 2))] = self.flip_bits(data[((x + 3) + (y * 2))])
-                    if self.hack_mf and found_hidden_data:
-                        data[x + 1] = data[x + 1] + 2
-                        data2 = bytearray(len(data) + 4)
-                        data2 = data[:x + (data[x + 1] * 2) - 2] + b'\x41\xf2\x42\xf6' + data[x + (data[x + 1] * 2) - 2:]
-                        data = data2
-                        x = x + 4
-                        found_hidden_data = 0
-                    continue
-
-        # Process hacking of Colors
-        self.logger.debug("Hack Colors on: {}".format(self.hack_color_on))
-        if self.hack_color_on:
-            for x in range(len(data)):
-                if data[x] == 0x29: # Start Field Extended
-                    for y in range(data[x + 1]):
-                        if(len(data) < ((x + 3) + (y * 2))):
-                            continue
-                        if self.hack_color_sfe and data[((x + 3) + (y * 2)) - 1] == 0x42: # Color
-                            if data[((x + 3) + (y * 2))] == 0xf8: # Black
-                                if self.hack_color_hv:
-                                    data[x + 1] = data[x + 1] + 2
-                                    data2 = bytearray(len(data) + 4)
-                                    data2 = data[:((x + 3) + (y * 2)) + 1] + b'\x41\xf2\x42\xf6' + data[((x + 3) + (y * 2)) + 1:]
-                                    x = x + 4
-                                else:
-                                    data[x + 1] = data[x + 1] + 1
-                                    data2 = bytearray(len(data) + 2)
-                                    data2 = data[:((x + 3) + (y * 2)) + 1] + b'\x42\xf6' + data[((x + 3) + (y * 2)) + 1:]
-                                    x = x + 2
-                                data = data2
-                elif data[x] == 0x28: # Set Attribute
-                    if self.hack_color_sa and data[x + 1] == 0x42: # Color
-                        if data[x + 2] == 0xf8: # Black
-                            if self.hack_color_hv:
-                                data2 = bytearray(len(data) + 6)
-                                data2 = data[:x + 3] + b'\x28\x41\xf2\x28\x42\xf6' + data[x + 3:]
-                                x = x + 6
-                            else:
-                                data2 = bytearray(len(data) + 3)
-                                data2 = data[:x + 3] + b'\x28\x42\xf6' + data[x + 3:]
-                                x = x + 3
-                            data = data2
-                    continue
-                elif data[x] == 0x2c: # Modify Field
-                    for y in range(data[x + 1]):
-                        if(len(data) < ((x + 3) + (y * 2))):
-                            continue
-                        if self.hack_color_mf and data[((x + 3) + (y * 2)) - 1] == 0x42: # Color
-                            if data[((x + 3) + (y * 2))] == 0xf8: # Black
-                                if self.hack_color_hv:
-                                    data[x + 1] = data[x + 1] + 2
-                                    data2 = bytearray(len(data) + 4)
-                                    data2 = data[:((x + 3) + (y * 2)) + 1] + b'\x41\xf2\x42\xf6' + data[((x + 3) + (y * 2)) + 1:]
-                                    x = x + 4
-                                else:
-                                    data[x + 1] = data[x + 1] + 1
-                                    data2 = bytearray(len(data) + 2)
-                                    data2 = data[:((x + 3) + (y * 2)) + 1] + b'\x42\xf6' + data[((x + 3) + (y * 2)) + 1:]
-                                    x = x + 2
-                                data = data2
-                    continue
-
-        return(data)
+        return self._protocol._do_manipulate(tn3270_data, self)
         
     def parse_telnet(self, ebcdic_string):
         self.logger.debug("Parsing Telnet bytes: {}".format(ebcdic_string))

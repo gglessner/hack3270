@@ -1,0 +1,3 @@
+upstream: https://github.com/gglessner/hackterm-core
+pinned_commit: (run scripts/update-vendored.sh after the upstream repo exists)
+pinned_at: 2026-04-18

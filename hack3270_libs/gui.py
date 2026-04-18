@@ -10,7 +10,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QTabWidget, QLabel, QPushButton, QCheckBox, QComboBox, QGroupBox,
     QTreeWidget, QTreeWidgetItem, QTextEdit, QFileDialog, QHeaderView,
-    QSplitter, QFrame, QScrollArea, QSizePolicy, QLineEdit
+    QSplitter, QFrame, QScrollArea, QSizePolicy, QLineEdit,
+    QSpinBox, QRadioButton, QListWidget, QListWidgetItem, QDockWidget,
+    QButtonGroup
 )
 
 class NumericTreeWidgetItem(QTreeWidgetItem):
@@ -306,7 +308,10 @@ class Hack3270GUI(QMainWindow):
         self.tab3_height = 180   # Tab 3: AID Spoofing
         self.tab4_height = 700   # Tab 4: Field Fuzzing
         self.tab5_height = 700   # Tab 5: Order Fuzzing (same as Field Fuzzing)
-        self.tall_height = 525   # Tabs 6, 7, 9: Logs, Analysis, Help (Statistics uses tall_height + 100)
+        self.tab6_height = 400   # Tab 6: Negotiation (LU spoofing)
+        self.tab7_height = 400   # Tab 7: Structured Fields (QR + IND$FILE)
+        self.tab8_height = 600   # Tab 8: State Fuzzer (flow recorder + analyzer)
+        self.tall_height = 525   # Logs, Analysis, Help (Statistics uses tall_height + 100)
         self.user_tall_height = self.tall_height  # Remember user's preferred tall height
         
         # Central widget
@@ -336,14 +341,20 @@ class Hack3270GUI(QMainWindow):
         self.create_aid_spoofing_tab()
         self.create_field_fuzzing_tab()
         self.create_order_fuzzing_tab()
+        self.create_negotiation_tab()
+        self.create_structured_tab()
+        self.create_state_fuzzer_tab()
         self.create_logs_tab()
         self.create_analysis_tab()
         self.create_statistics_tab()
         self.create_help_tab()
-        
+
+        # ESM findings dock — always visible, populated by attack_refresh()
+        self.create_esm_dock()
+
         # Disable tabs in offline mode
         if self.hack3270.is_offline():
-            for i in range(6):  # Disable first 6 tabs (including AID Spoofing, Field Fuzzing, Order Fuzzing)
+            for i in range(9):  # Disable first 9 tabs (Hack..Order + Negotiation + Structured + State Fuzzer)
                 self.tabs.setTabEnabled(i, False)
         
         # Full horizontal width, start with tab 0 height
@@ -357,13 +368,14 @@ class Hack3270GUI(QMainWindow):
         
     def on_tab_changed(self, index):
         """Resize window height based on tab - each tab has its own height"""
-        # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing, 
-        #              4=Field Fuzzing, 5=Order Fuzzing, 6=Logs, 7=Analysis, 8=Statistics, 9=Help
-        
+        # Tab indices: 0=Hack Fields, 1=Inject Fields, 2=Inject Keys, 3=AID Spoofing,
+        #              4=Field Fuzzing, 5=Order Fuzzing, 6=Negotiation, 7=Structured,
+        #              8=State Fuzzer, 9=Logs, 10=Analysis, 11=Statistics, 12=Help
+
         # Save tall height when leaving Help tab (only Help uses user-resizable height)
-        if self.last_tab_index == 9:
+        if self.last_tab_index == 12:
             self.user_tall_height = self.height()
-        
+
         # Handle height - each tab has its own height
         if index == 0:  # Hack Field Attributes
             self.resize(self.screen_width, self.tab0_height)
@@ -377,8 +389,14 @@ class Hack3270GUI(QMainWindow):
             self.resize(self.screen_width, self.tab4_height)
         elif index == 5:  # Order Fuzzing
             self.resize(self.screen_width, self.tab5_height)
-        elif index in [6, 7, 8]:  # Logs, Analysis, Statistics - same fixed height
-            if index == 6:  # Logs
+        elif index == 6:  # Negotiation
+            self.resize(self.screen_width, self.tab6_height)
+        elif index == 7:  # Structured Fields
+            self.resize(self.screen_width, self.tab7_height)
+        elif index == 8:  # State Fuzzer
+            self.resize(self.screen_width, self.tab8_height)
+        elif index in [9, 10, 11]:  # Logs, Analysis, Statistics - same fixed height
+            if index == 9:  # Logs
                 self.update_logs_tab()
                 # Scroll to last item on first visit to Logs tab
                 if not self.logs_initial_scroll_done and self.log_tree.topLevelItemCount() > 0:
@@ -388,7 +406,7 @@ class Hack3270GUI(QMainWindow):
                     self.log_tree.setCurrentItem(last_item)
                     self.log_tree.scrollToItem(last_item, QTreeWidget.PositionAtBottom)
             self.resize(self.screen_width, self.tall_height + 100)
-        elif index == 9:  # Help - use user's preferred tall height
+        elif index == 12:  # Help - use user's preferred tall height
             target_height = max(self.user_tall_height, self.tall_height)
             self.resize(self.screen_width, target_height)
         
@@ -398,6 +416,12 @@ class Hack3270GUI(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.run_loop)
         self.timer.start(10)
+        # Phase 3: slow poll for attack-object state (ESM findings,
+        # LU harvest/results, IND$FILE captures). 1.5s — these are
+        # passive observers, no need for sub-second updates.
+        self.attack_timer = QTimer()
+        self.attack_timer.timeout.connect(self.attack_refresh)
+        self.attack_timer.start(1500)
         
     def run_loop(self):
         if self.hack3270.is_offline():
@@ -413,7 +437,7 @@ class Hack3270GUI(QMainWindow):
                 self.aid_refresh()
             
             # Update logs tab if we're on it, or if Follow mode is active
-            if self.tabs.currentIndex() == 4 or self.log_follow_mode:  # Logs tab or Follow mode
+            if self.tabs.currentIndex() == 9 or self.log_follow_mode:  # Logs tab or Follow mode
                 self.update_logs_tab()
             
             # Check if inject config was just set (mask captured)
@@ -1419,8 +1443,9 @@ class Hack3270GUI(QMainWindow):
                     client_messages += 1
                     client_bytes += data_len
                 
-                # TN3270 negotiation
-                if 'tn3270 negotiation' in notes.lower():
+                # TN3270 negotiation (Phase 1: ProxyDaemon tags as 'telnet negotiation',
+                # legacy DBs have 'tn3270 negotiation' — match either)
+                if 'negotiation' in notes.lower():
                     negotiations += 1
                 
                 # Session detection (small server response typically = new connection)
@@ -3708,9 +3733,565 @@ class Hack3270GUI(QMainWindow):
             if pf_name in self.aid_checkboxes:
                 self.aid_checkboxes[pf_name].setChecked(True)
                 
+    # ----------------------------------------------------------------------
+    # Phase 3: Negotiation tab (LU-name spoofing)
+    # ----------------------------------------------------------------------
+
+    def create_negotiation_tab(self):
+        tab = QWidget()
+        layout = QHBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(20)
+
+        # --- Mode selector --------------------------------------------------
+        mode_group = QGroupBox("Mode")
+        mode_layout = QVBoxLayout(mode_group)
+        self.lu_mode_group = QButtonGroup(tab)
+        self.lu_mode_single = QRadioButton("Single")
+        self.lu_mode_wordlist = QRadioButton("Wordlist")
+        self.lu_mode_harvest = QRadioButton("Harvest")
+        self.lu_mode_single.setChecked(True)
+        for rb in (self.lu_mode_single, self.lu_mode_wordlist, self.lu_mode_harvest):
+            self.lu_mode_group.addButton(rb)
+            mode_layout.addWidget(rb)
+            rb.toggled.connect(self._lu_mode_changed)
+        mode_layout.addStretch()
+        layout.addWidget(mode_group)
+
+        # --- Single mode pane ----------------------------------------------
+        single_group = QGroupBox("Single Target")
+        single_layout = QVBoxLayout(single_group)
+        single_layout.addWidget(QLabel("LU Name:"))
+        self.lu_target_entry = QLineEdit()
+        self.lu_target_entry.setPlaceholderText("e.g. TCP00001")
+        single_layout.addWidget(self.lu_target_entry)
+        set_btn = QPushButton("Set Target")
+        set_btn.clicked.connect(self._lu_set_target)
+        single_layout.addWidget(set_btn)
+        single_layout.addStretch()
+        layout.addWidget(single_group)
+
+        # --- Wordlist mode pane --------------------------------------------
+        wl_group = QGroupBox("Wordlist")
+        wl_layout = QVBoxLayout(wl_group)
+        wl_top = QHBoxLayout()
+        self.lu_wl_path = QLineEdit("injections/lu-names.txt")
+        wl_top.addWidget(self.lu_wl_path)
+        wl_browse = QPushButton("...")
+        wl_browse.setMaximumWidth(40)
+        wl_browse.clicked.connect(self._lu_browse_wordlist)
+        wl_top.addWidget(wl_browse)
+        wl_layout.addLayout(wl_top)
+        wl_btns = QHBoxLayout()
+        wl_load = QPushButton("Load")
+        wl_load.clicked.connect(self._lu_load_wordlist)
+        wl_btns.addWidget(wl_load)
+        wl_next = QPushButton("Try Next")
+        wl_next.setProperty("class", "success")
+        wl_next.clicked.connect(self._lu_try_next)
+        wl_btns.addWidget(wl_next)
+        wl_layout.addLayout(wl_btns)
+        self.lu_wl_progress = QLabel("0 / 0")
+        wl_layout.addWidget(self.lu_wl_progress)
+        wl_layout.addStretch()
+        layout.addWidget(wl_group)
+
+        # --- Harvest pane ---------------------------------------------------
+        harvest_group = QGroupBox("Harvested LU Names")
+        harvest_layout = QVBoxLayout(harvest_group)
+        self.lu_harvest_list = QListWidget()
+        harvest_layout.addWidget(self.lu_harvest_list)
+        layout.addWidget(harvest_group)
+
+        # --- Results table --------------------------------------------------
+        results_group = QGroupBox("Results")
+        results_layout = QVBoxLayout(results_group)
+        self.lu_results_tree = QTreeWidget()
+        self.lu_results_tree.setHeaderLabels(["LU", "Result"])
+        self.lu_results_tree.setColumnWidth(0, 120)
+        results_layout.addWidget(self.lu_results_tree)
+        layout.addWidget(results_group, stretch=2)
+
+        # --- Status line ----------------------------------------------------
+        self.lu_status = QLabel("Ready.")
+
+        # Wrap horizontal layout + status into a vertical container
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(tab)
+        outer.addWidget(self.lu_status)
+
+        self.tabs.addTab(container, "Negotiation")
+
+    def _lu_mode_changed(self):
+        if self.lu_mode_single.isChecked():
+            self.hack3270.lu_spoofer.mode = "single"
+        elif self.lu_mode_wordlist.isChecked():
+            self.hack3270.lu_spoofer.mode = "wordlist"
+        elif self.lu_mode_harvest.isChecked():
+            self.hack3270.lu_spoofer.mode = "harvest"
+
+    def _lu_set_target(self):
+        name = self.lu_target_entry.text().strip()
+        if not name:
+            self.lu_status.setText("No LU name entered.")
+            return
+        self.hack3270.lu_spoofer.set_target(name)
+        self.lu_status.setText(f"Target set: {name}. Reconnect to apply.")
+
+    def _lu_browse_wordlist(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select LU Wordlist", "injections", "Text Files (*.txt);;All Files (*)")
+        if path:
+            self.lu_wl_path.setText(path)
+
+    def _lu_load_wordlist(self):
+        path = self.lu_wl_path.text().strip()
+        try:
+            self.hack3270.lu_spoofer.load_wordlist(path)
+        except OSError as e:
+            self.lu_status.setText(f"Load failed: {e}")
+            return
+        n = len(self.hack3270.lu_spoofer.wordlist)
+        self.lu_wl_progress.setText(f"0 / {n}")
+        self.lu_status.setText(f"Loaded {n} LU names.")
+
+    def _lu_try_next(self):
+        spoofer = self.hack3270.lu_spoofer
+        lu = spoofer.next_lu()
+        if lu is None:
+            self.lu_status.setText("Wordlist exhausted.")
+            return
+        idx = spoofer._wordlist_idx
+        total = len(spoofer.wordlist)
+        self.lu_wl_progress.setText(f"{idx} / {total}")
+        self.lu_status.setText(f"Armed: {lu}. Reconnect to apply.")
+
+    # ----------------------------------------------------------------------
+    # Phase 3: Structured Fields tab (Query Reply + IND$FILE)
+    # ----------------------------------------------------------------------
+
+    def create_structured_tab(self):
+        tab = QWidget()
+        layout = QHBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(20)
+
+        # === Left half: Query Reply Liar ===================================
+        qr_group = QGroupBox("Query Reply Liar")
+        qr_layout = QVBoxLayout(qr_group)
+
+        self.qr_arm_cb = QCheckBox("Arm Query Reply Liar")
+        self.qr_arm_cb.toggled.connect(self._qr_arm_toggled)
+        qr_layout.addWidget(self.qr_arm_cb)
+
+        # Geometry spinboxes
+        geo = QHBoxLayout()
+        geo.addWidget(QLabel("Alt Rows:"))
+        self.qr_rows = QSpinBox()
+        self.qr_rows.setRange(1, 200)
+        self.qr_rows.setValue(24)
+        geo.addWidget(self.qr_rows)
+        geo.addSpacing(10)
+        geo.addWidget(QLabel("Alt Cols:"))
+        self.qr_cols = QSpinBox()
+        self.qr_cols.setRange(1, 200)
+        self.qr_cols.setValue(80)
+        geo.addWidget(self.qr_cols)
+        geo.addStretch()
+        qr_layout.addLayout(geo)
+
+        # Deny checkboxes
+        self.qr_deny_color = QCheckBox("Deny Color")
+        self.qr_deny_hl = QCheckBox("Deny Highlighting")
+        self.qr_deny_gfx = QCheckBox("Deny Graphics")
+        for cb in (self.qr_deny_color, self.qr_deny_hl, self.qr_deny_gfx):
+            qr_layout.addWidget(cb)
+
+        # RPQ name
+        rpq_row = QHBoxLayout()
+        rpq_row.addWidget(QLabel("RPQ Name:"))
+        self.qr_rpq = QLineEdit()
+        self.qr_rpq.setPlaceholderText("e.g. IBM-3279")
+        rpq_row.addWidget(self.qr_rpq)
+        qr_layout.addLayout(rpq_row)
+
+        self.qr_status = QLabel("Disarmed.")
+        qr_layout.addWidget(self.qr_status)
+        qr_layout.addStretch()
+        layout.addWidget(qr_group)
+
+        # === Right half: IND$FILE ==========================================
+        ind_group = QGroupBox("IND$FILE Interceptor")
+        ind_layout = QVBoxLayout(ind_group)
+
+        # Mode radios
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Mode:"))
+        self.ind_mode_group = QButtonGroup(tab)
+        self.ind_mode_alert = QRadioButton("Alert")
+        self.ind_mode_cc = QRadioButton("Carbon Copy")
+        self.ind_mode_inject = QRadioButton("Inject")
+        self.ind_mode_alert.setChecked(True)
+        for rb in (self.ind_mode_alert, self.ind_mode_cc, self.ind_mode_inject):
+            self.ind_mode_group.addButton(rb)
+            mode_row.addWidget(rb)
+            rb.toggled.connect(self._ind_mode_changed)
+        mode_row.addStretch()
+        ind_layout.addLayout(mode_row)
+
+        # Capture dir
+        dir_row = QHBoxLayout()
+        dir_row.addWidget(QLabel("Capture Dir:"))
+        self.ind_dir = QLineEdit(str(self.hack3270.indfile.capture_dir))
+        dir_row.addWidget(self.ind_dir)
+        dir_browse = QPushButton("...")
+        dir_browse.setMaximumWidth(40)
+        dir_browse.clicked.connect(self._ind_browse_dir)
+        dir_row.addWidget(dir_browse)
+        ind_layout.addLayout(dir_row)
+
+        # Captures table
+        self.ind_captures_tree = QTreeWidget()
+        self.ind_captures_tree.setHeaderLabels(["Timestamp", "Direction", "Size", "Path"])
+        self.ind_captures_tree.setColumnWidth(0, 150)
+        self.ind_captures_tree.setColumnWidth(1, 70)
+        self.ind_captures_tree.setColumnWidth(2, 70)
+        ind_layout.addWidget(self.ind_captures_tree)
+
+        layout.addWidget(ind_group, stretch=2)
+
+        self.tabs.addTab(tab, "Structured Fields")
+
+    def _qr_arm_toggled(self, checked):
+        if checked:
+            from hackterm_core.protocol import QueryLies
+            rpq = self.qr_rpq.text().strip() or None
+            lies = QueryLies(
+                alt_rows=self.qr_rows.value(),
+                alt_cols=self.qr_cols.value(),
+                deny_color=self.qr_deny_color.isChecked(),
+                deny_highlighting=self.qr_deny_hl.isChecked(),
+                deny_graphics=self.qr_deny_gfx.isChecked(),
+                rpq_name=rpq,
+            )
+            self.hack3270.qr_liar.arm(lies)
+            self.qr_status.setText(
+                f"Armed: {lies.alt_rows}x{lies.alt_cols}, "
+                f"deny_color={lies.deny_color}, rpq={rpq or '-'}")
+        else:
+            self.hack3270.qr_liar.disarm()
+            self.qr_status.setText("Disarmed.")
+
+    def _ind_mode_changed(self):
+        if self.ind_mode_alert.isChecked():
+            self.hack3270.indfile.mode = "alert"
+        elif self.ind_mode_cc.isChecked():
+            self.hack3270.indfile.mode = "carbon_copy"
+        elif self.ind_mode_inject.isChecked():
+            self.hack3270.indfile.mode = "inject"
+
+    def _ind_browse_dir(self):
+        path = QFileDialog.getExistingDirectory(self, "Capture Directory", ".")
+        if path:
+            self.ind_dir.setText(path)
+            import pathlib
+            self.hack3270.indfile.capture_dir = pathlib.Path(path)
+
+    # ----------------------------------------------------------------------
+    # Phase 3: State Fuzzer tab (flow record → analyze → mutate-replay)
+    # ----------------------------------------------------------------------
+
+    _FUZZ_MUTATIONS = ["length_plus_1", "length_double", "type_confusion",
+                       "extra_sba", "step_swap"]
+
+    def create_state_fuzzer_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # --- Top: name entry + Record/Stop toggle + status -----------------
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Flow Name:"))
+        self._fuzz_name_entry = QLineEdit()
+        self._fuzz_name_entry.setPlaceholderText("e.g. login_flow")
+        self._fuzz_name_entry.setMaximumWidth(250)
+        top.addWidget(self._fuzz_name_entry)
+        self._fuzz_record_btn = QPushButton("Record")
+        self._fuzz_record_btn.setProperty("class", "success")
+        self._fuzz_record_btn.clicked.connect(self._on_record_toggle)
+        top.addWidget(self._fuzz_record_btn)
+        top.addSpacing(20)
+        self._fuzz_status = QLabel("Idle")
+        top.addWidget(self._fuzz_status)
+        top.addStretch()
+        layout.addLayout(top)
+
+        # --- Middle: split flow tree | results table ----------------------
+        split = QSplitter(Qt.Horizontal)
+
+        # Left: recorded flows → steps → fields
+        flow_pane = QWidget()
+        flow_layout = QVBoxLayout(flow_pane)
+        flow_layout.setContentsMargins(0, 0, 0, 0)
+        flow_layout.addWidget(QLabel("Recorded Flows"))
+        self._flow_tree = QTreeWidget()
+        self._flow_tree.setHeaderLabels(["Flow / Step / Field"])
+        flow_layout.addWidget(self._flow_tree)
+        analyze_btn = QPushButton("Analyze Selected Flow")
+        analyze_btn.clicked.connect(self._on_analyze_flow)
+        flow_layout.addWidget(analyze_btn)
+        split.addWidget(flow_pane)
+
+        # Right: echo-target results table
+        results_pane = QWidget()
+        results_layout = QVBoxLayout(results_pane)
+        results_layout.setContentsMargins(0, 0, 0, 0)
+        results_layout.addWidget(QLabel("Echo Targets"))
+        self._fuzz_targets_tree = QTreeWidget()
+        self._fuzz_targets_tree.setHeaderLabels(
+            ["Step", "Field", "Source Step", "Confidence", "Echo Preview"])
+        self._fuzz_targets_tree.setColumnWidth(0, 50)
+        self._fuzz_targets_tree.setColumnWidth(1, 50)
+        self._fuzz_targets_tree.setColumnWidth(2, 90)
+        self._fuzz_targets_tree.setColumnWidth(3, 90)
+        results_layout.addWidget(self._fuzz_targets_tree)
+
+        # Mutation row
+        mut_row = QHBoxLayout()
+        mut_row.addWidget(QLabel("Mutation:"))
+        self._fuzz_mutation_combo = QComboBox()
+        self._fuzz_mutation_combo.addItems(self._FUZZ_MUTATIONS)
+        mut_row.addWidget(self._fuzz_mutation_combo)
+        self._fuzz_target_btn = QPushButton("Fuzz Selected Target")
+        self._fuzz_target_btn.setEnabled(False)  # enabled when analyze populates targets
+        self._fuzz_target_btn.clicked.connect(self._on_fuzz_target)
+        mut_row.addWidget(self._fuzz_target_btn)
+        mut_row.addStretch()
+        results_layout.addLayout(mut_row)
+
+        split.addWidget(results_pane)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 2)
+        layout.addWidget(split)
+
+        self.tabs.addTab(tab, "State Fuzzer")
+
+        # Caches: last analyzed flow + targets, so the preview column
+        # can render echoed bytes without re-querying SQLite.
+        self._fuzz_last_flow = None
+        self._fuzz_last_targets = []
+
+        self._refresh_flow_tree()
+
+    def _on_record_toggle(self):
+        if self.hack3270.state_fuzzer.recording:
+            flow_id = self.hack3270.state_fuzzer.stop_recording()
+            self._fuzz_status.setText(f"Saved as Flow #{flow_id}")
+            self._fuzz_record_btn.setText("Record")
+            self._refresh_flow_tree()
+        else:
+            name = self._fuzz_name_entry.text() or "unnamed"
+            self.hack3270.state_fuzzer.start_recording(name)
+            self._fuzz_status.setText(f"Recording: {name}")
+            self._fuzz_record_btn.setText("Stop")
+
+    def _on_analyze_flow(self):
+        selected = self._flow_tree.currentItem()
+        if not selected:
+            return
+        # Walk up to the top-level flow node — flow_id is stashed there.
+        while selected.parent() is not None:
+            selected = selected.parent()
+        flow_id = selected.data(0, Qt.UserRole)
+        if flow_id is None:
+            return
+        targets = self.hack3270.state_fuzzer.analyze(flow_id)
+        self._fuzz_last_flow = self.hack3270.state_fuzzer.load_flow(flow_id)
+        self._fuzz_last_targets = targets
+        self._populate_targets_table(targets)
+        self._fuzz_status.setText(
+            f"Flow #{flow_id}: {len(targets)} echo target(s) found")
+
+    def _on_fuzz_target(self):
+        """Drive the replay→mutate→classify loop on the selected target.
+
+        Caveat: fuzz_target() replays the recorded flow from step 0. If
+        the live session isn't at the same starting screen as the recording
+        was, the early steps will desync and the result will be
+        SCREEN_DIFFERS with diverged_at < target step. The user should
+        CLEAR back to the recording's starting point first.
+        """
+        if not getattr(self, '_fuzz_last_targets', None):
+            self._fuzz_status.setText("Fuzz: analyze a flow first")
+            return
+
+        item = self._fuzz_targets_tree.currentItem()
+        if item is None:
+            self._fuzz_status.setText("Fuzz: select a target row")
+            return
+        t_idx = item.data(0, Qt.UserRole)
+        if t_idx is None or t_idx >= len(self._fuzz_last_targets):
+            self._fuzz_status.setText("Fuzz: invalid selection")
+            return
+
+        target = self._fuzz_last_targets[t_idx]
+        mutation = self._fuzz_mutation_combo.currentText()
+        flow_id = self._fuzz_last_flow.id
+        daemon = self.hack3270._daemon
+
+        # step_swap needs another step's input — use step 0 as default swap source
+        swap_step = 0 if mutation == "step_swap" and target.source_step != 0 else None
+
+        self._fuzz_status.setText(
+            f"Fuzzing step {target.source_step} with {mutation}...")
+        QApplication.processEvents()  # let the status label paint before blocking
+
+        try:
+            result = self.hack3270.state_fuzzer.fuzz_target(
+                daemon, flow_id, target, mutation,
+                swap_step=swap_step, timeout=5.0,
+            )
+        except Exception as e:
+            self._fuzz_status.setText(f"Fuzz error: {e}")
+            return
+
+        cls = result.get("classification", "?")
+        diverged = result.get("diverged_at")
+
+        # Color-code the result
+        colors = {
+            "ABEND": "background-color: #ffcccc; color: #800000;",       # red — WIN
+            "DISCONNECT": "background-color: #ffe0cc; color: #804000;",  # orange — interesting
+            "SCREEN_DIFFERS": "background-color: #ffffcc; color: #606000;", # yellow — maybe
+            "IDENTICAL": "background-color: #e0e0e0; color: #404040;",   # grey — boring
+        }
+        self._fuzz_status.setStyleSheet(colors.get(cls, ""))
+
+        if diverged is not None:
+            self._fuzz_status.setText(
+                f"[{cls}] diverged at step {diverged} — session not at flow start? "
+                f"CLEAR and retry.")
+        else:
+            preview = result.get("response_text", "")[:80].strip()
+            self._fuzz_status.setText(
+                f"[{cls}] {mutation} @ step {target.source_step}: {preview}")
+
+    def _refresh_flow_tree(self):
+        """Repopulate the flow tree from the fuzzer's SQLite db."""
+        self._flow_tree.clear()
+        fuzzer = self.hack3270.state_fuzzer
+        cur = fuzzer.db.cursor()
+        cur.execute("SELECT id, name FROM Flows ORDER BY id")
+        for flow_id, name in cur.fetchall():
+            top = QTreeWidgetItem(self._flow_tree, [f"Flow {flow_id}: {name}"])
+            top.setData(0, Qt.UserRole, flow_id)
+            try:
+                flow = fuzzer.load_flow(flow_id)
+            except Exception:
+                continue
+            for s_idx, step in enumerate(flow.steps):
+                preview = step.host_screen.text.strip().replace("\n", " ")[:60]
+                step_node = QTreeWidgetItem(
+                    top, [f"Step {s_idx}: {preview or '(empty)'}"])
+                for f_idx, fld in enumerate(step.host_screen.fields):
+                    flags = []
+                    if fld.protected: flags.append("prot")
+                    if fld.hidden:    flags.append("hidden")
+                    if fld.numeric:   flags.append("num")
+                    flag_str = f" [{','.join(flags)}]" if flags else ""
+                    QTreeWidgetItem(step_node, [
+                        f"Field {f_idx} @ ({fld.row},{fld.col}) "
+                        f"len={fld.length}{flag_str}"])
+
+    def _populate_targets_table(self, targets):
+        self._fuzz_targets_tree.clear()
+        flow = self._fuzz_last_flow
+        for t_idx, t in enumerate(targets):
+            preview = ""
+            if flow is not None:
+                try:
+                    fld = flow.steps[t.step_idx].host_screen.fields[t.field_idx]
+                    # content is raw EBCDIC — show hex for safety
+                    preview = fld.content.hex()[:40]
+                except (IndexError, AttributeError):
+                    pass
+            item = QTreeWidgetItem(self._fuzz_targets_tree, [
+                str(t.step_idx),
+                str(t.field_idx),
+                str(t.source_step),
+                f"{t.confidence:.2f}",
+                preview,
+            ])
+            item.setData(0, Qt.UserRole, t_idx)  # for _on_fuzz_target lookup
+        # Enable Fuzz button only if there are targets to fuzz
+        self._fuzz_target_btn.setEnabled(bool(targets))
+
+    # ----------------------------------------------------------------------
+    # Phase 3: ESM Findings dock widget
+    # ----------------------------------------------------------------------
+
+    def create_esm_dock(self):
+        self.esm_dock = QDockWidget("ESM Findings", self)
+        self.esm_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self.esm_list = QListWidget()
+        self.esm_list.setMinimumWidth(280)
+        self.esm_dock.setWidget(self.esm_list)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.esm_dock)
+        self._esm_seen_keys = set()
+
+    # ----------------------------------------------------------------------
+    # Phase 3: slow refresh — pull state from attack objects into widgets
+    # ----------------------------------------------------------------------
+
+    _SEVERITY_COLORS = {
+        "high":   QColor(255, 80, 80),    # red — username_enum etc.
+        "medium": QColor(255, 200, 50),   # yellow — inference findings
+        "low":    QColor(80, 220, 120),   # green — ESM-confirmed
+    }
+
+    def attack_refresh(self):
+        # ESM findings → dock list (incremental: only new keys)
+        for key, finding in self.hack3270.esm.findings.items():
+            if key in self._esm_seen_keys:
+                continue
+            self._esm_seen_keys.add(key)
+            sev = finding.get("severity", "low")
+            desc = finding.get("description", "")
+            item = QListWidgetItem(f"[!] {key}: {desc}")
+            item.setForeground(self._SEVERITY_COLORS.get(sev, QColor(212, 212, 212)))
+            self.esm_list.addItem(item)
+
+        # LU harvested set → harvest list
+        spoofer = self.hack3270.lu_spoofer
+        if len(spoofer.harvested) != self.lu_harvest_list.count():
+            self.lu_harvest_list.clear()
+            for lu in sorted(spoofer.harvested):
+                self.lu_harvest_list.addItem(lu)
+
+        # LU results → results tree
+        if len(spoofer.results) != self.lu_results_tree.topLevelItemCount():
+            self.lu_results_tree.clear()
+            for lu, result in spoofer.results:
+                QTreeWidgetItem(self.lu_results_tree, [lu, result])
+
+        # IND$FILE captures → captures tree
+        captures = self.hack3270.indfile.captures
+        if len(captures) != self.ind_captures_tree.topLevelItemCount():
+            self.ind_captures_tree.clear()
+            for cap in captures:
+                ts = datetime.datetime.fromtimestamp(cap["timestamp"]).strftime("%H:%M:%S")
+                QTreeWidgetItem(self.ind_captures_tree, [
+                    ts, cap.get("direction") or "?",
+                    str(cap.get("size", 0)), cap.get("path") or "-",
+                ])
+
     def closeEvent(self, event):
         # Stop the timer first to prevent run_loop from accessing closed sockets
         self.timer.stop()
+        self.attack_timer.stop()
         self.hack3270.on_closing()
         event.accept()
 

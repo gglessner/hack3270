@@ -1,0 +1,4 @@
+upstream: https://github.com/gglessner/Endevor-MCP
+vendored_subset: endevor_mcp/ package only (client.py, server.py, __init__.py) + run.py shim
+pinned_commit: (run scripts/update-vendored.sh to refresh and record)
+pinned_at: 2026-04-18

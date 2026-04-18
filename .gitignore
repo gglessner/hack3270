@@ -1,7 +1,10 @@
 # Session databases (contain captured traffic)
-pentest.db
-pentest.csv
+*.db
+*.csv
 *.db.bak
+*_captures/
+*_flows.db
+old/
 
 # Python
 __pycache__/
