@@ -263,6 +263,7 @@ class Hack3270GUI(QMainWindow):
         self.inject_pause_flag = False  # Flag to pause injection loop
         self.inject_lines = []  # Lines loaded from injection file
         self.inject_index = 0   # Current position in injection file
+        self._rec_mask_full = ""  # Full recommended mask string (for Copy)
         self.send_keys_stop_flag = False  # Flag to stop send keys loop
         self.logs_initial_scroll_done = False  # Flag to scroll to last log on first Logs tab visit
 
@@ -303,7 +304,7 @@ class Hack3270GUI(QMainWindow):
         
         # Window sizing configuration - TWEAK THESE VALUES
         self.tab0_height = 200   # Tab 0: Hack Field Attributes
-        self.tab1_height = 180   # Tab 1: Inject Into Fields
+        self.tab1_height = 230   # Tab 1: Inject Into Fields
         self.tab2_height = 250   # Tab 2: Inject Key Presses
         self.tab3_height = 180   # Tab 3: AID Spoofing
         self.tab4_height = 700   # Tab 4: Field Fuzzing
@@ -618,8 +619,35 @@ class Hack3270GUI(QMainWindow):
         self.keys_combo.addItems(["ENTER", "ENTER+CLEAR", "ENTER+PF3", "ENTER+PF3+CLEAR"])
         opts_layout.addWidget(self.keys_combo)
         
+        # --- Recommended MASK calculator (sits to the right of the options)
+        # Reads the selected injection file and shows the run of mask chars
+        # to type into the tn3270 field so the captured field length fits
+        # the file's longest entry. Auto-updates on FILE select and when the
+        # mask char changes.
+        opts_layout.addSpacing(30)
+        maskcalc_lbl = QLabel("Recommended MASK:")
+        maskcalc_lbl.setProperty("class", "header")
+        opts_layout.addWidget(maskcalc_lbl)
+        self.rec_mask_stats = QLabel("Select a file to calculate the mask.")
+        opts_layout.addWidget(self.rec_mask_stats)
+        opts_layout.addSpacing(15)
+        opts_layout.addWidget(QLabel("Send this:"))
+        self.rec_mask_field = QLineEdit()
+        self.rec_mask_field.setReadOnly(True)
+        self.rec_mask_field.setMinimumWidth(260)
+        self.rec_mask_field.setPlaceholderText(
+            "mask string appears here after you select a file")
+        opts_layout.addWidget(self.rec_mask_field)
+        self.rec_mask_copy_btn = QPushButton("Copy")
+        self.rec_mask_copy_btn.clicked.connect(self._copy_recommended_mask)
+        opts_layout.addWidget(self.rec_mask_copy_btn)
+        
         opts_layout.addStretch()
         layout.addLayout(opts_layout)
+        
+        # Recompute whenever the selected mask character changes
+        self.mask_combo.currentTextChanged.connect(
+            lambda _=None: self._compute_recommended_mask())
         
         layout.addSpacing(20)
         self.tabs.addTab(tab, "Inject Into Fields")
@@ -3323,6 +3351,77 @@ class Hack3270GUI(QMainWindow):
         else:
             self.inject_status.setText("Error: file not set.")
             self.inject_status.setProperty("class", "status-error")
+        self.inject_status.style().unpolish(self.inject_status)
+        self.inject_status.style().polish(self.inject_status)
+        self._compute_recommended_mask()
+    
+    def _compute_recommended_mask(self):
+        """Read the selected injection file and show the MASK (a run of the
+        currently selected mask char) to send in the tn3270 session so the
+        captured field length fits the file's longest entry. Length is
+        measured with rstrip() to match _load_inject_file / _inject_one_line."""
+        # Widgets may not exist yet during early construction
+        if not hasattr(self, "rec_mask_field") or not hasattr(self, "rec_mask_stats"):
+            return
+        mask_char = self.mask_combo.currentText() if hasattr(self, "mask_combo") else "*"
+        if not mask_char:
+            mask_char = "*"
+        self._rec_mask_full = ""
+        if not self.inject_filename:
+            self.rec_mask_stats.setText("Select a file to calculate the mask.")
+            self.rec_mask_field.clear()
+            return
+        try:
+            max_len = 0
+            min_len = None
+            count = 0
+            with open(self.inject_filename, "r", errors="replace") as f:
+                for line in f:
+                    n = len(line.rstrip())
+                    count += 1
+                    if n > max_len:
+                        max_len = n
+                    if min_len is None or n < min_len:
+                        min_len = n
+        except Exception as e:
+            self.rec_mask_stats.setText("Could not read file: {}".format(e))
+            self.rec_mask_field.clear()
+            return
+        if count == 0 or max_len == 0:
+            self.rec_mask_stats.setText(
+                "File has no usable entries (all lines empty).")
+            self.rec_mask_field.clear()
+            return
+        if min_len is None:
+            min_len = 0
+        self._rec_mask_full = mask_char * max_len
+        # Cap the display string so the widget stays responsive on huge fields;
+        # the full-length string is still what Copy puts on the clipboard.
+        display_limit = 4096
+        if max_len > display_limit:
+            self.rec_mask_field.setText(mask_char * display_limit)
+            self.rec_mask_stats.setText(
+                "Longest entry: {} chars  |  Shortest: {}  |  Lines: {}  "
+                "(display truncated to {}; Copy gives full {})".format(
+                    max_len, min_len, count, display_limit, max_len))
+        else:
+            self.rec_mask_field.setText(self._rec_mask_full)
+            self.rec_mask_stats.setText(
+                "Longest entry: {} chars  |  Shortest: {}  |  Lines: {}  "
+                "(send {} '{}' chars)".format(
+                    max_len, min_len, count, max_len, mask_char))
+    
+    def _copy_recommended_mask(self):
+        """Copy the full recommended mask string to the clipboard."""
+        mask_str = getattr(self, "_rec_mask_full", "") or self.rec_mask_field.text()
+        if not mask_str:
+            self.inject_status.setText("No mask to copy - select a file first.")
+            self.inject_status.setProperty("class", "status-error")
+        else:
+            QApplication.clipboard().setText(mask_str)
+            self.inject_status.setText(
+                "Copied {}-char mask to clipboard.".format(len(mask_str)))
+            self.inject_status.setProperty("class", "status-ready")
         self.inject_status.style().unpolish(self.inject_status)
         self.inject_status.style().polish(self.inject_status)
     
