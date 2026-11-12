@@ -1,75 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- Removed an unused integration.
+
+---
+
 ## Version 2.8.1
 
-### Endevor-MCP Skill: Source Code Discovery Guidance
-
-Updated `skills/endevor-mcp.md` with practical guidance for finding source code in enterprise Endevor environments:
-
-- **Element path from app team is the primary workflow** — the tester should provide the Endevor element path (environment, stage, system, subsystem, type) supplied by the application team, and the AI jumps straight to listing/retrieving
-- **Search by name as secondary** — use wildcards with context from the pen test (transaction names, program names from screens) to search directly
-- **Hierarchy walk requires human approval** — the AI must explicitly ask the user for permission before browsing the Endevor inventory top-down, since large enterprises have thousands of systems and unbounded walks waste time
+- Documentation updates.
 
 ---
 
 ## Version 2.8.0
 
-### Endevor-MCP v1.1.0: Auto-Connect, API Fixes, and Debug Toggle
-
-Streamlined the Endevor-MCP server for zero-configuration usage and fixed compatibility with real Endevor REST API servers.
-
-#### Auto-Connect at Startup
-- Connection and JWT authentication now happen automatically when the MCP starts — no `endevor_connect` or `endevor_authenticate` calls needed
-- All 22 tools default `conn_id` to `"auto"`, so the AI can call tools directly without specifying a connection
-- `endevor_connect` demoted to advanced use (connecting to a second Endevor instance)
-- MCP server instructions rewritten to tell AI agents: "just start using tools"
-
-#### Endevor REST API v2 Compatibility Fixes
-- **Wildcard path fix**: List endpoints now include `*` in the URL path (e.g. `/env/*` instead of `/env`), matching the Broadcom API spec — fixes HTTP 500 / RC 0020 RSN 0033 on real servers
-- **Token parsing fix**: `authenticate()` correctly handles `{"data": [{"token": "..."}]}` response format from real Endevor servers
-- **Bearer token persistence**: JWT token explicitly injected into per-request headers, surviving redirects and session state changes
-- **Basic Auth cleanup**: Cleared from session after JWT obtained to prevent sending both auth types
-- **Credential passthrough**: `endevor_authenticate` accepts `username`/`password` for cases where credentials weren't provided at connect time
-
-#### Debug Toggle
-- `ENDEVOR_DEBUG=true` in `mcp.json` enables full HTTP request/response logging to stderr — no source code edits needed
-- Logs method, URL, parameters, auth headers, response status, body length, and content
-- Startup diagnostic output (config dump, auth result details, tracebacks) gated behind the same toggle
-
-#### File Reorganization
-- Moved `MCPs/run_endevor_mcp.py` into `MCPs/endevor_mcp/run.py` for cleaner project structure
-- Updated `.cursor/mcp.json` and `.vscode/mcp.json` to match
-
-#### AI Skill Updates
-- Rewrote `skills/endevor-mcp.md` with prominent "DO NOT call endevor_connect" guidance and step-by-step inventory browsing walkthrough
-- Updated `.cursor/skills/endevor-mcp/SKILL.md` pointer with same guidance
+- Maintenance updates and fixes.
 
 ---
 
 ## Version 2.7.0
 
-### Endevor-MCP Integration: Source-Informed Pen Testing
+### Skill Updates
 
-Added a companion **Endevor-MCP** server that provides read-only access to Broadcom Endevor SCM, enabling AI agents to retrieve COBOL source, BMS maps, and system tables during live pen testing. When used alongside hack3270, this transforms the assessment methodology from blind black-box testing to **source-informed, live-verified** testing.
-
-#### Endevor-MCP Server
-- Read-only interaction with Endevor REST API v2
-- Browse inventory: environments, systems, subsystems, types, elements
-- Retrieve source code for COBOL programs, BMS maps, system tables (PCT, PPT, FCT), CLISTs
-- Pre-configured `auto` connection when `ENDEVOR_HOST` environment variables are set
-- MCP configuration included in `.cursor/mcp.json` and `.vscode/mcp.json`
-
-#### hack3270 Skill Updates
-- **New Phase 2A: Endevor-Enhanced Testing** -- complete methodology for parallel source analysis and live verification. Retrieve COBOL, BMS, and system tables while navigating screens with hack3270. Verify every source-code finding live.
 - **Deferred TSO escape** -- documented that routing field corruption may not trigger immediately; pressing navigation PF keys (PF5, PF3) after field modification can produce a deferred `READY` prompt
 - **TIME output buffering** -- added guidance that TSO `TIME` output may require CLEAR to display
 - **KICKS recovery sequence** -- explicit steps to return from TSO to KICKS without using LOGOFF (which strands the terminal)
 - **`send_fields_data` field inclusion warning** -- critical note that only explicitly specified fields are sent; FSET/PROT fields must be manually included in the payload
-- **`fuzz_field` category filter caveat** -- warning that the tool may send payloads from all categories regardless of the `categories` parameter
+- **`fuzz_field` category filter caveat** -- warning that `fuzz_field` may send payloads from all categories regardless of the `categories` parameter
 - **CLEAR key trapping** -- note that some COBOL programs intercept CLEAR and redisplay; suggests PF3 as alternative exit
-
-#### Performance Impact
-Endevor-enhanced methodology reduced a full DVCA application pen test from ~8.5 minutes to ~4.5 minutes (46% faster) with identical vulnerability coverage (8 findings, 3 positive controls). Source analysis eliminates blind brute forcing, systematic AID key scanning, and guess-and-check fuzzing -- the AI reads the vulnerability in source and verifies it in one shot.
 
 ---
 

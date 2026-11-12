@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Refresh vendored copies of hackterm-core and Endevor-MCP from their
-# canonical GitHub repos. Run from the hack3270 repo root.
+# Refresh the vendored copy of hackterm-core from its
+# canonical GitHub repo. Run from the hack3270 repo root.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,6 +30,5 @@ vendor() {
 }
 
 vendor https://github.com/gglessner/hackterm-core "$ROOT/hackterm-core"
-vendor https://github.com/gglessner/Endevor-MCP   "$ROOT/MCPs/endevor_mcp" "endevor_mcp"
 
 echo "done. (hackterm-core is loaded via sys.path from ./hackterm-core — no pip install needed)"

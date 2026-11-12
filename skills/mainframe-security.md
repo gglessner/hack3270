@@ -1,36 +1,25 @@
 # Mainframe Application Security Assessment
 
-Endevor-MCP transforms mainframe penetration testing from black-box TN3270 interaction into white-box source-informed analysis. This covers the full field of mainframe application security — applicable to banking, insurance, government, healthcare, retail, telecommunications, and any z/OS environment running CICS, IMS, or batch applications.
+Access to the application's source code transforms mainframe penetration testing from black-box TN3270 interaction into white-box source-informed analysis. This covers the full field of mainframe application security — applicable to banking, insurance, government, healthcare, retail, telecommunications, and any z/OS environment running CICS, IMS, or batch applications.
 
-## Architecture: Endevor-MCP + hack3270
+## Architecture: hack3270 + Application Source
 
-When both tools are available, they form a complete mainframe application testing platform:
+When the application source is available, the two form a complete mainframe application testing platform:
 
 ```
 [AI Agent]
     ├── hack3270 MCP (52 tools) ──TCP:31337──> [hack3270 Proxy] ──TN3270──> [Mainframe CICS/IMS]
     │   Screen reading, field manipulation, fuzzing, brute force, AID scanning
     │
-    └── Endevor-MCP (22 read-only tools) ──HTTPS──> [Endevor REST API] ──> [Source Repository]
+    └── Application source (from the application team)
         COBOL, BMS, copybooks, JCL, ASM, PL/I — change history, dependencies
 ```
 
-hack3270 operates the live application; Endevor-MCP reads the source code behind it. Every finding from hack3270 can be source-confirmed, and every source code vulnerability can be live-tested through hack3270.
+hack3270 operates the live application; the source shows the code behind it. Every finding from hack3270 can be source-confirmed, and every source code vulnerability can be live-tested through hack3270.
 
 ## Phase 1: Reconnaissance — Map the Application Landscape
 
-```
-endevor_list_environments(conn_id="conn-1")
-endevor_list_systems(conn_id="conn-1", environment="PROD", stage="1")
-endevor_list_subsystems(conn_id="conn-1", environment="PROD", stage="1", system="*")
-endevor_list_types(conn_id="conn-1", environment="PROD", stage="1", system="*")
-endevor_list_elements(conn_id="conn-1", environment="PROD", stage="1",
-    system="*", subsystem="*", type_name="COBOL")
-endevor_list_elements(conn_id="conn-1", environment="PROD", stage="1",
-    system="*", subsystem="*", type_name="BMS")
-endevor_list_elements(conn_id="conn-1", environment="PROD", stage="1",
-    system="*", subsystem="*", type_name="JCL")
-```
+Inventory the source by system and subsystem: COBOL programs, BMS mapsets, copybooks and JCL.
 
 Build a map: system -> subsystem -> programs -> BMS maps -> copybooks -> JCL. This reveals the full attack surface before touching the live application.
 
@@ -38,9 +27,7 @@ Build a map: system -> subsystem -> programs -> BMS maps -> copybooks -> JCL. Th
 
 Retrieve BMS mapsets to understand every field on every screen before testing with hack3270.
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., type_name="BMS", element="MENUMAP")
-```
+Source to review: `MENUMAP` (BMS).
 
 **What to look for in BMS source:**
 
@@ -57,9 +44,7 @@ endevor_retrieve_element(conn_id="conn-1", ..., type_name="BMS", element="MENUMA
 
 After BMS analysis, retrieve the COBOL program to check if the server validates field values:
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., type_name="COBOL", element="MENUPGM")
-```
+Source to review: `MENUPGM` (COBOL).
 
 Find `EXEC CICS RECEIVE MAP` and trace every field from the symbolic map through the program logic.
 
@@ -99,9 +84,7 @@ END-IF
 
 **Dynamic SQL with string concatenation from MAP input is exploitable.**
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., type_name="COBOL", element="SRCHPGM")
-```
+Source to review: `SRCHPGM` (COBOL).
 
 **VULNERABLE — dynamic SQL from user input:**
 ```cobol
@@ -141,9 +124,7 @@ EXEC SQL EXECUTE DYN-STMT USING :WS-PARAM1 END-EXEC
 
 ## Phase 5: Vulnerability Class — Hardcoded Credentials
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="DBCONN")
-```
+Source to review: `DBCONN`.
 
 **Search patterns in COBOL source:**
 - `MOVE 'password' TO WS-PASSWORD` / `MOVE 'SYSADM' TO WS-USERID`
@@ -167,9 +148,7 @@ endevor_retrieve_element(conn_id="conn-1", ..., element="DBCONN")
 
 **Critical question: does the program check WHO is making the request before performing the action?**
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., type_name="COBOL", element="XFERPGM")
-```
+Source to review: `XFERPGM` (COBOL).
 
 **VULNERABLE — no authorization check:**
 ```cobol
@@ -206,9 +185,7 @@ END-IF
 
 COMMAREA is how CICS programs pass data to each other. Misuse leaks data or enables tampering.
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="LINKPGM")
-```
+Source to review: `LINKPGM`.
 
 **VULNERABLE — COMMAREA length mismatch (data leakage):**
 ```cobol
@@ -245,9 +222,7 @@ If `WS-COMM-AREA` contains more data than needed (debug info, internal flags, se
 
 TSQ data is accessible to any authorized transaction in the CICS region. If queue names are predictable, any user can read another user's session data.
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="SESSMGR")
-```
+Source to review: `SESSMGR`.
 
 **VULNERABLE — predictable queue names:**
 ```cobol
@@ -277,9 +252,7 @@ SSN and balance stored in a queue with a fixed name — any transaction can `REA
 
 Most CICS applications are pseudo-conversational: they terminate after each screen interaction and restart when the user responds. State is passed via COMMAREA or TSQ.
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="MAINPGM")
-```
+Source to review: `MAINPGM`.
 
 **VULNERABLE — trusted state in COMMAREA:**
 ```cobol
@@ -303,9 +276,7 @@ The auth level is stored in COMMAREA and trusted on the next invocation. An atta
 
 The most dangerous form of protected field tampering. If a protected field contains the current transaction code and the server reads it without validation, replacing it with an unrecognized value can escape to TSO.
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="MAINPGM")
-```
+Source to review: `MAINPGM`.
 
 **VULNERABLE — transaction code used without validation:**
 ```cobol
@@ -325,9 +296,7 @@ END-EVALUATE
 
 ## Phase 11: Vulnerability Class — EVALUATE EIBAID / Hidden Functionality
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="MAINPGM")
-```
+Source to review: `MAINPGM`.
 
 Find the `EVALUATE EIBAID` block and document every handler:
 
@@ -349,9 +318,7 @@ Every AID handler is an attack surface. Check each handler's code for authorizat
 
 Sending non-numeric data to COMP-3 (packed decimal) or numeric fields causes S0C7 abends. These are critical findings — they prove the application doesn't validate input before arithmetic operations.
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., type_name="COPYBOOK", element="CUSTREC")
-```
+Source to review: `CUSTREC` (COPYBOOK).
 
 **Target fields from copybooks:**
 
@@ -373,9 +340,7 @@ COMPUTE WS-TOTAL = WS-AMOUNT * WS-RATE  *SOC7 if non-numeric
 
 CICS programs access VSAM files. Check if file access is authorized and whether key values can be manipulated.
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="FILEPGM")
-```
+Source to review: `FILEPGM`.
 
 **VULNERABLE — user-supplied key to file read:**
 ```cobol
@@ -394,9 +359,7 @@ If `CUSTIDI` comes from the MAP with no authorization check, any user can read a
 
 ## Phase 14: Vulnerability Class — CICS ASSIGN Information Disclosure
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="UTILPGM")
-```
+Source to review: `UTILPGM`.
 
 **Information available via EXEC CICS ASSIGN:**
 - `USERID` — current user ID
@@ -414,9 +377,7 @@ EXEC CICS SEND TEXT FROM(ERR-MSG) ...
 
 ## Phase 15: Vulnerability Class — Error Handling Information Disclosure
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="ERRPGM")
-```
+Source to review: `ERRPGM`.
 
 **VULNERABLE — detailed error messages:**
 ```cobol
@@ -435,9 +396,7 @@ RESP/RESP2 codes, file names, and key values revealed to the user. Also check:
 
 ## Phase 16: Vulnerability Class — COBOL REDEFINES Type Confusion
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., type_name="COPYBOOK", element="TRANSREC")
-```
+Source to review: `TRANSREC` (COPYBOOK).
 
 REDEFINES allows the same storage to be interpreted as different data types:
 
@@ -450,10 +409,7 @@ If `TRANS-AMT-TEXT` is populated from user input and then `TRANS-AMOUNT` is used
 
 ## Phase 17: Vulnerability Class — Batch JCL Security
 
-```
-endevor_list_elements(conn_id="conn-1", ..., type_name="JCL")
-endevor_retrieve_element(conn_id="conn-1", ..., type_name="JCL", element="NIGHTRUN")
-```
+Source to review: every JCL member, for example `NIGHTRUN`.
 
 **What to check in JCL:**
 
@@ -470,7 +426,7 @@ endevor_retrieve_element(conn_id="conn-1", ..., type_name="JCL", element="NIGHTR
 | `DSN=SYS1.*` | References to system datasets |
 | `DISP=(OLD,DELETE)` | Destructive operations on datasets |
 
-**Post-exploitation value:** If TSO escape is achieved via hack3270, Endevor JCL provides:
+**Post-exploitation value:** If TSO escape is achieved via hack3270, the application's JCL provides:
 - Valid JOBCARD format for the environment
 - Dataset naming conventions (HLQ patterns)
 - STEPLIB concatenations revealing load libraries
@@ -478,9 +434,7 @@ endevor_retrieve_element(conn_id="conn-1", ..., type_name="JCL", element="NIGHTR
 
 ## Phase 18: Vulnerability Class — Program Flow / Authorization Bypass
 
-```
-endevor_retrieve_element(conn_id="conn-1", ..., element="MAINPGM")
-```
+Source to review: `MAINPGM`.
 
 Trace `EXEC CICS LINK` and `EXEC CICS XCTL` chains:
 
@@ -491,8 +445,8 @@ IF WS-AUTH-RESULT = 'OK'
 END-IF
 ```
 
-**Question:** Can `PROCDATA` be invoked directly via its own transaction, bypassing `AUTHCHK`? Use Endevor to find if `PROCDATA` is defined as a standalone transaction or only called via LINK.
+**Question:** Can `PROCDATA` be invoked directly via its own transaction, bypassing `AUTHCHK`? Check the source and the PCT to find if `PROCDATA` is defined as a standalone transaction or only called via LINK.
 
-**Component analysis:** Use `endevor_print_element_components(conn_id="conn-1", ..., element="MAINPGM", print_option="browse")` to see all dependencies.
+**Component analysis:** List every program, copybook and map that `MAINPGM` uses (its LINK/XCTL targets and COPY statements) to see all dependencies.
 
 For change intelligence and testing prioritization workflows, see [security-checklist.md](security-checklist.md).

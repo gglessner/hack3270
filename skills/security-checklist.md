@@ -1,6 +1,6 @@
 # Source Code Review Checklist & hack3270 Cross-Reference
 
-After retrieving source from Endevor, systematically search for these patterns. For detailed vulnerability descriptions, COBOL code patterns, and exploitation steps, see [mainframe-security.md](mainframe-security.md).
+After obtaining the application source, systematically search for these patterns. For detailed vulnerability descriptions, COBOL code patterns, and exploitation steps, see [mainframe-security.md](mainframe-security.md).
 
 ## Comprehensive Source Code Review Checklist
 
@@ -72,20 +72,15 @@ After retrieving source from Endevor, systematically search for these patterns. 
 
 Recently changed code and pending deployments are high-value targets — new code has new bugs.
 
-```
-endevor_print_element(conn_id="conn-1", ..., element="PAYPGM", print_option="summary")
-endevor_print_element(conn_id="conn-1", ..., element="PAYPGM", print_option="changes")
-endevor_list_elements(conn_id="conn-1", ..., where_ccid_all="HOTFIX*")
-endevor_list_packages(conn_id="conn-1", status="APPROVED,INAPPROVAL")
-endevor_list_packages(conn_id="conn-1", package="PKG001", detail="SCL")
-```
+- Ask the application team which programs changed recently and what is pending deployment
+- Review the change history of high-value programs first (hotfixes, emergency changes)
 
-## hack3270 + Endevor-MCP Cross-Reference
+## hack3270 + Source Review Cross-Reference
 
-| Testing Activity | hack3270 Tool | Endevor-MCP Tool |
+| Testing Activity | hack3270 Tool | Source to Review |
 |-----------------|---------------|-----------------|
 | See what's on screen | `get_screen()` | — |
-| Understand screen layout | `analyze_screen_fields()` | `endevor_retrieve_element(..., type_name="BMS")` |
+| Understand screen layout | `analyze_screen_fields()` | BMS map source |
 | Find hidden fields | `analyze_hidden()`, `get_hidden_fields()` | BMS source: `ATTRB=(ASKIP,DRK)` |
 | Understand hidden field purpose | — | COBOL source: trace symbolic map field name |
 | Test hidden field tampering | `send_field_data()` | COBOL source: check if field is validated after RECEIVE MAP |
@@ -95,9 +90,9 @@ endevor_list_packages(conn_id="conn-1", package="PKG001", detail="SCL")
 | SQL injection | `send_field_data()`, `fuzz_field()` | COBOL source: `EXEC SQL PREPARE` from MAP input |
 | Fuzz with informed payloads | `fuzz_field()`, `fuzz_all_input_fields()` | Copybook: `PIC`, `COMP-3` definitions |
 | Brute force credentials | `brute_force_field()` | COBOL source: where/how auth is checked |
-| Trace program flow | — | `endevor_retrieve_element` chain + `_print_element_components` |
-| Identify recent changes | — | `endevor_print_element(..., print_option="changes"/"summary")` |
-| JCL for post-exploitation | — | `endevor_retrieve_element(..., type_name="JCL")` |
+| Trace program flow | — | COBOL source: XCTL/LINK chain |
+| Identify recent changes | — | Change history of the source |
+| JCL for post-exploitation | — | JCL source |
 | Enumerate transactions | `fuzz_transaction_codes()` | COBOL source: EVALUATE routing tables |
 | Understand data formats | — | Copybook: field PIC clauses, COMP-3, REDEFINES |
 | Find hardcoded credentials | — | COBOL/JCL/REXX source: PASSWORD, PASSWD patterns |

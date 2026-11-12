@@ -12,12 +12,11 @@ This directory contains skill files that teach AI assistants how to use hack3270
 | `hack3270.md` | Guardrailed pen testing skill | Production/authorized application testing with scope constraints, safety limits, and human approval requirements |
 | `tn3270-pentest.md` | Unrestricted pen testing skill | Labs, CTFs, and full-scope engagements with no restrictions |
 
-### Endevor-MCP (Source Code Review)
+### Source Code Review
 
 | File | Purpose | Read When |
 |------|---------|-----------|
-| `endevor-mcp.md` | Endevor SCM integration -- 22 read-only tools | Source code retrieval, inventory browsing, element inspection, package listing |
-| `mainframe-security.md` | 19 vulnerability classes with COBOL code patterns | Security assessment of mainframe source code retrieved via Endevor |
+| `mainframe-security.md` | 19 vulnerability classes with COBOL code patterns | Security assessment of mainframe application source code |
 | `security-checklist.md` | 10-category review checklist + hack3270 cross-reference | Structured source code review with pen testing integration |
 
 ## Which Skill Do I Use?

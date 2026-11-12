@@ -1335,38 +1335,37 @@ The MCP tools handle this automatically. Use `check_connection()` or `get_protoc
 
 ---
 
-## 9. Combining with Endevor-MCP
+## 9. Combining with Application Source
 
-If the Endevor-MCP server is also available, you can dramatically accelerate pen testing by running **source code retrieval and live exploitation in parallel**. This section describes the methodology that reduced a full DVCA pen test from potentially hours (black-box) to **under 10 minutes** (source-informed).
+If the application's source code is available, you can dramatically accelerate pen testing by running **source code review and live exploitation in parallel**. This section describes the methodology that reduced a full DVCA pen test from potentially hours (black-box) to **under 10 minutes** (source-informed).
 
 ### When to Use This Approach
 
 Use it when:
-- The Endevor-MCP server is running and connected (`endevor_connect` or `conn_id='auto'`)
-- The target application's source code is managed in Endevor
+- The target application's source code is available to you
 - Your human has authorized source code access (it may be a separate authorization from the pen test itself)
 
-If Endevor is not available, fall back to the standard methodology in the skill file. Everything in hack3270 still works without source code -- it just takes longer because you must discover vulnerabilities through trial and error.
+If source is not available, fall back to the standard methodology in the skill file. Everything in hack3270 still works without source code -- it just takes longer because you must discover vulnerabilities through trial and error.
 
 ### The Parallel Workflow
 
-The key insight is that Endevor queries and hack3270 interactions are **independent operations against different servers**. You should run them at the same time, not sequentially.
+The key insight is that source review and hack3270 interactions are **independent operations**. You should run them at the same time, not sequentially.
 
 **Phase 1: Inventory (run both simultaneously)**
 
-| Endevor-MCP (source) | hack3270 (live) |
+| Source (static) | hack3270 (live) |
 |---|---|
-| `endevor_list_environments` | `get_screen()` -- see the entry point |
-| `endevor_list_systems` | `analyze_screen_fields()` -- discover fields |
-| `endevor_list_subsystems` | Navigate to first menu screen |
-| `endevor_list_types` | Record transaction codes visible on screen |
-| `endevor_list_elements` for each type | Map all reachable screens via menu navigation |
+| List the systems and subsystems | `get_screen()` -- see the entry point |
+| List COBOL programs | `analyze_screen_fields()` -- discover fields |
+| List BMS maps | Navigate to first menu screen |
+| List system tables (PCT/PPT/FCT) | Record transaction codes visible on screen |
+| List copybooks and JCL | Map all reachable screens via menu navigation |
 
-By the time you finish listing Endevor elements, you should also have a complete screen map from hack3270.
+By the time you finish the source inventory, you should also have a complete screen map from hack3270.
 
-**Phase 2: Targeted Source Retrieval**
+**Phase 2: Targeted Source Review**
 
-Retrieve source in this priority order:
+Review source in this priority order:
 
 1. **System tables (PCT/PPT/FCT)** -- these are small and contain the complete transaction-to-program mapping. The PCT alone tells you every valid transaction code and which COBOL program handles it. This is faster than `fuzz_transaction_codes()` and gives you 100% coverage.
 
@@ -1412,15 +1411,15 @@ Result: Hidden screen reached in 1 action
 
 ### Reporting with Source Evidence
 
-When Endevor was used, each finding in the report should include:
+When source was used, each finding in the report should include:
 - **Source evidence**: The specific COBOL program, BMS map, and the relevant code snippet
 - **Live verification**: The hack3270 exploitation steps and screen output
 
 This produces findings with two independent evidence chains -- source-confirmed, live-verified -- which is the strongest possible pen test evidence. Auditors and developers can go directly to the source line to understand and fix the issue.
 
-### If Endevor Is Not Available
+### If Source Is Not Available
 
-Everything above is a nice-to-have. If Endevor is not available:
+Everything above is a nice-to-have. If source is not available:
 - Follow the standard methodology in the skill file
 - Use `fuzz_transaction_codes()` instead of the PCT to discover transactions
 - Use `analyze_hidden()` and `get_hidden_fields()` to find hidden fields (you won't know their purpose without source)
@@ -1430,4 +1429,4 @@ Everything above is a nice-to-have. If Endevor is not available:
 
 The vulnerability classes are the same -- it just takes longer to find them.
 
-See `skills/endevor-mcp.md` for Endevor tool reference, `skills/mainframe-security.md` for 19 vulnerability classes with COBOL patterns, and `skills/security-checklist.md` for a source code review checklist cross-referenced to hack3270 tools.
+See `skills/mainframe-security.md` for 19 vulnerability classes with COBOL patterns, and `skills/security-checklist.md` for a source code review checklist cross-referenced to hack3270 tools.
