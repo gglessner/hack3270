@@ -92,6 +92,8 @@ class ProxyDaemon:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if self.use_tls:
             ctx = ssl._create_unverified_context()
+            ctx.minimum_version = ssl.TLSVersion.TLSv1
+            ctx.set_ciphers("DEFAULT@SECLEVEL=0")
             sock = ctx.wrap_socket(sock, server_hostname=self.target_addr[0])
         sock.connect(self.target_addr)
         self.server = sock
