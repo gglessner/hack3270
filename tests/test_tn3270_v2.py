@@ -546,3 +546,64 @@ def test_spoof_aid_tn3270e(tn3270, gold):
 def test_spoof_aid_short_packet_no_crash(tn3270):
     """Empty/short packet → return unchanged, don't IndexError."""
     assert tn3270.spoof_aid(b"", 0xF3) == b""
+
+
+# ===========================================================================
+# Alternate screen sizes (Model 3/4/5) — grid must auto-grow, never IndexError
+#
+# Regression for the crash: the host switches to an alternate screen size
+# (Erase/Write Alternate, 0x7E) and addresses rows beyond the Model-2 default
+# of 24×80. The parser hard-coded a 24×80 grid, so put_char() ran off the end
+# with "IndexError: list index out of range". The grid now grows on demand;
+# columns stay 80 (correct for Models 2/3/4).
+# ===========================================================================
+
+def _ew_alt_at(addr: int, text: bytes) -> bytes:
+    """Build an Erase/Write-Alternate datastream that writes `text` at `addr`."""
+    from hack3270_libs.tn3270_v2 import encode_addr
+    return (bytes([0x7E, 0x00])           # EW Alternate + WCC
+            + bytes([0x11]) + encode_addr(addr)   # SBA → addr
+            + text
+            + bytes([0xFF, 0xEF]))        # IAC EOR
+
+
+def test_alt_screen_row31_no_crash(tn3270):
+    """Writing on row 31 (addr 2400) must not raise IndexError."""
+    screen = tn3270.parse(_ew_alt_at(30 * 80, bytes([0xC1, 0xC2, 0xC3])))  # "ABC"
+    assert screen.rows >= 31
+    assert screen.cols == 80
+    assert screen.rendered[30][0:3] == ["A", "B", "C"]
+
+
+def test_alt_screen_model4_bottom_row(tn3270):
+    """Model 4 is 43×80; the last row (addr 42*80) must render."""
+    screen = tn3270.parse(_ew_alt_at(42 * 80, bytes([0xE9])))  # "Z"
+    assert screen.rows >= 43
+    assert len(screen.rendered) >= 43
+    assert screen.rendered[42][0] == "Z"
+
+
+def test_alt_screen_grid_is_rectangular(tn3270):
+    """Every grown row keeps the full column width."""
+    screen = tn3270.parse(_ew_alt_at(40 * 80, bytes([0xC1])))
+    assert all(len(row) == screen.cols for row in screen.rendered)
+
+
+def test_normal_screen_stays_24_rows(tn3270, gold):
+    """Model-2 traffic must not grow the grid — no behaviour change."""
+    screen = tn3270.parse(gold("simple_sf.bin"))
+    assert screen.rows == 24
+    assert len(screen.rendered) == 24
+
+
+def test_alt_screen_growth_capped(tn3270):
+    """A Repeat-to-Address with an unreachable target must terminate."""
+    from hack3270_libs.tn3270_v2 import encode_addr, _MAX_GRID_ROWS
+    # SBA to addr 1, then RA back to addr 0 with no open field: fills forward
+    # and wraps; the guard must stop it rather than spin forever.
+    pkt = (bytes([0x7E, 0x00])
+           + bytes([0x11]) + encode_addr(1)
+           + bytes([0x3C]) + encode_addr(0) + bytes([0x60])  # RA → 0, fill '-'
+           + bytes([0xFF, 0xEF]))
+    screen = tn3270.parse(pkt)          # must return, not hang
+    assert screen.rows <= _MAX_GRID_ROWS
