@@ -158,6 +158,14 @@ def rowcol_to_addr(row: int, col: int, cols: int = 80) -> int:
 # Internal parser state — one instance per parse() call
 # ===========================================================================
 
+# Safety cap for auto-growing the render grid. The largest standard 3270
+# model is 5 (27×132); the widest 14-bit buffer address is 16383, which at
+# 80 cols lands on row 205. 255 rows sits above every legal address, so the
+# cap never clips a real screen — it only stops a malformed/hostile stream
+# (e.g. a Repeat-to-Address with an unreachable target) from growing forever.
+_MAX_GRID_ROWS = 255
+
+
 @dataclass
 class _ParseState:
     """Mutable parser state. Lives for the duration of one parse() call."""
@@ -182,14 +190,31 @@ class _ParseState:
     def screen_size(self) -> int:
         return self.rows * self.cols
 
+    def _ensure_row(self, r: int) -> None:
+        """Grow the grid so 1-indexed row `r` exists. Columns stay fixed.
+
+        The parser starts at the Model-2 default (24×80). When the host
+        drives an alternate screen size (Erase/Write Alternate, Model 3/4/5)
+        it addresses rows beyond 24; we grow on demand instead of crashing.
+        Width stays 80 — correct for Models 2/3/4; a 132-col Model 5 would
+        render wrapped, but never crashes. Growth is capped at _MAX_GRID_ROWS.
+        """
+        if r <= self.rows:
+            return
+        target = min(r, _MAX_GRID_ROWS)
+        while self.rows < target:
+            self.grid.append([" "] * self.cols)
+            self.rows += 1
+
     def advance(self, n: int = 1):
         """Advance buffer address with wraparound."""
         self.addr = (self.addr + n) % self.screen_size
 
     def put_char(self, ebcdic_byte: int, codec: EbcdicCodec, render: bool = True):
         """Write one char into the grid at current addr, advance, accumulate."""
-        if render:
-            r, c = addr_to_rowcol(self.addr, self.cols)
+        r, c = addr_to_rowcol(self.addr, self.cols)
+        self._ensure_row(r)   # grow for alternate screen sizes before writing
+        if render and r <= self.rows:
             ch = codec.to_ascii(bytes([ebcdic_byte]))
             # to_ascii returns '[0xNN]' for control bytes — show as space on screen
             self.grid[r - 1][c - 1] = ch if len(ch) == 1 else " "
@@ -454,11 +479,15 @@ class TN3270(Protocol):
                     target = decode_addr(data[i+1], data[i+2])
                     fill = data[i+3]
                     hide = (st.cur_field_attr & ATTR_DISPLAY) == ATTR_NONDISPLAY
-                    # Wraparound-safe fill
-                    while st.addr != target:
+                    # Wraparound-safe fill. The guard bounds the loop at one
+                    # full (max-size) buffer so a malformed target can't spin
+                    # forever now that the grid auto-grows.
+                    guard = _MAX_GRID_ROWS * st.cols + 1
+                    while st.addr != target and guard > 0:
                         st.put_char(fill, self.codec, render=not hide)
                         if st.addr == st.cur_field_start:  # full wrap
                             break
+                        guard -= 1
                     i += 4
                 else:
                     break
